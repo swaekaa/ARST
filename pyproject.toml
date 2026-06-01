@@ -1,0 +1,113 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arst"
+version = "0.1.0"
+description = "Adaptive Reliability Sensor Transformer for Multimodal Behavior Recognition"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+
+dependencies = [
+    # Core ML — NOTE: torch/torchvision/torchaudio must be installed separately
+    # via the PyTorch CUDA index to get GPU support:
+    #   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+    # Do NOT let pip resolve torch from PyPI (CPU-only build).
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "scikit-learn>=1.4.0",
+
+    # Data
+    "pyarrow>=15.0.0",       # Parquet support
+    "h5py>=3.10.0",          # HDF5 for processed data
+    "scipy>=1.12.0",         # Signal processing
+
+    # Configuration
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+
+    # Experiment Tracking
+    "wandb>=0.16.0",
+
+    # Visualization
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "plotly>=5.18.0",
+
+    # Explainability
+    "shap>=0.44.0",
+    "captum>=0.7.0",         # PyTorch native interpretability
+
+    # Utilities
+    "tqdm>=4.66.0",
+    "rich>=13.7.0",          # Rich terminal output
+    "einops>=0.7.0",         # Tensor manipulation
+    "timm>=0.9.0",           # Pre-built vision Transformer blocks
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "ruff>=0.2.0",
+    "isort>=5.13.0",
+    "pre-commit>=3.6.0",
+    "mypy>=1.8.0",
+    "ipykernel>=6.29.0",
+    "jupyter>=1.0.0",
+    "nbconvert>=7.14.0",
+]
+
+kaggle = [
+    "kaggle>=1.6.0",
+]
+
+onnx = [
+    "onnx>=1.15.0",
+    "onnxruntime-gpu>=1.17.0",
+    "onnxruntime-tools>=1.7.0",
+]
+
+[project.scripts]
+arst-train = "arst.scripts.train:main"
+arst-eval = "arst.scripts.evaluate:main"
+arst-infer = "arst.scripts.infer:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311"]
+skip-magic-trailing-comma = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = ["E501", "B008", "B905", "N806", "N812", "F841", "B006", "SIM108"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["arst"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --cov=src/arst --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/arst"]
+omit = ["tests/*", "scripts/*", "notebooks/*"]

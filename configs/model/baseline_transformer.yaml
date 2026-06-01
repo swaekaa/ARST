@@ -1,0 +1,32 @@
+# ============================================================
+# Transformer Baseline Configuration
+# ============================================================
+
+# @package _global_
+
+defaults:
+  - _self_
+
+model:
+  name: "baseline_transformer"
+  type: "baseline_transformer"
+
+  d_model: 256
+  in_channels_total: 134       # 6 (IMU) + 64 (thermal) + 64 (ToF)
+
+  # --- Transformer Encoder ---
+  transformer:
+    num_layers: 4
+    num_heads: 8
+    d_ff: 1024
+    dropout: 0.1
+    attention_dropout: 0.1
+    pos_encoding: "sinusoidal"
+    pool_type: "cls"
+
+  # --- Classification Head ---
+  classification_head:
+    d_hidden: 256
+    num_classes: ???
+    dropout: 0.1
+    activation: "gelu"

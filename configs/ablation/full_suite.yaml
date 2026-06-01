@@ -1,0 +1,103 @@
+# ============================================================
+# Full Ablation Suite Configuration
+# ============================================================
+
+# Each entry defines one ablation variant
+# run: python scripts/run_ablation.py --config configs/ablation/full_suite.yaml
+
+global:
+  n_seeds: 5                    # Bootstrap over 5 seeds
+  base_seeds: [42, 7, 13, 99, 2024]
+  epochs: 80                    # Shorter than full training for speed
+  device: "cuda"
+  log_to_wandb: true
+  wandb_group: "phase7_ablation"
+
+variants:
+
+  # ── ARST Variants ─────────────────────────────────────────
+  - id: "ARST-Full"
+    description: "Full ARST model (primary)"
+    overrides:
+      model.reliability.enabled: true
+      model.reliability.activation: "sigmoid"
+      model.fusion.type: "adaptive"
+      model.fusion.use_reliability_bias: true
+      training.loss.lambda_rel: 0.1
+
+  - id: "ARST-NoRel"
+    description: "ARST without reliability heads"
+    overrides:
+      model.reliability.enabled: false
+      model.fusion.type: "adaptive"
+      model.fusion.use_reliability_bias: false
+
+  - id: "ARST-SoftmaxRel"
+    description: "ARST with softmax reliability (competitive)"
+    overrides:
+      model.reliability.enabled: true
+      model.reliability.activation: "softmax"
+      model.fusion.type: "adaptive"
+      model.fusion.use_reliability_bias: true
+
+  - id: "ARST-NoRelLoss"
+    description: "ARST without reliability regularization"
+    overrides:
+      model.reliability.enabled: true
+      training.loss.lambda_rel: 0.0
+
+  - id: "ARST-MeanFusion"
+    description: "ARST with mean pooling fusion"
+    overrides:
+      model.fusion.type: "mean"
+
+  - id: "ARST-ConcatFusion"
+    description: "ARST with concatenation fusion"
+    overrides:
+      model.fusion.type: "concat"
+
+  # ── Baseline Comparisons ──────────────────────────────────
+  - id: "B-TF"
+    description: "Transformer baseline"
+    config: "baseline_transformer"
+
+  - id: "B-LSTM"
+    description: "BiLSTM baseline"
+    config: "baseline_lstm"
+
+  - id: "B-CNN"
+    description: "CNN baseline"
+    config: "baseline_cnn"
+
+  # ── Encoder Ablations ────────────────────────────────────
+  - id: "ARST-IMU-CNN"
+    description: "ARST with CNN IMU encoder instead of Transformer"
+    overrides:
+      model.imu_encoder.type: "cnn"
+
+  - id: "ARST-SharedEncoders"
+    description: "ARST with shared weights between thermal and ToF encoders"
+    overrides:
+      model.tof_encoder.shared_with_thermal: true
+
+  # ── Depth Ablations ──────────────────────────────────────
+  - id: "ARST-L2"
+    description: "ARST with L=2 fusion layers"
+    overrides:
+      model.fusion.num_layers: 2
+
+  - id: "ARST-L6"
+    description: "ARST with L=6 fusion layers"
+    overrides:
+      model.fusion.num_layers: 6
+
+  # ── Dimension Ablations ───────────────────────────────────
+  - id: "ARST-D128"
+    description: "ARST with D=128"
+    overrides:
+      model.d_model: 128
+
+  - id: "ARST-D512"
+    description: "ARST with D=512"
+    overrides:
+      model.d_model: 512

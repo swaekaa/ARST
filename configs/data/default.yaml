@@ -1,0 +1,107 @@
+# ============================================================
+# ARST Default Data Configuration
+# ============================================================
+
+# @package _global_
+
+defaults:
+  - _self_
+
+data:
+  # --- Paths ---
+  raw_dir: ${hydra:runtime.cwd}/data/raw
+  processed_dir: ${hydra:runtime.cwd}/data/processed
+  interim_dir: ${hydra:runtime.cwd}/data/interim
+
+  # --- Modalities ---
+  modalities:
+    - imu
+    - thermopile
+    - tof
+
+  # --- Windowing ---
+  window_size: 256          # timesteps (IMU @ 50Hz → 5.12 seconds)
+  window_stride: 128        # 50% overlap during training
+  window_stride_eval: 256   # No overlap at inference
+  pad_mode: "zero"          # "zero" | "reflect" | "tile"
+
+  # --- IMU ---
+  imu:
+    channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
+    n_channels: 6
+    sampling_rate: 50        # Hz
+    bandpass_low: 0.5        # Hz
+    bandpass_high: 20.0      # Hz
+    remove_gravity: true
+    normalization: "zscore"  # "zscore" | "minmax" | "none"
+
+  # --- Thermopile ---
+  thermopile:
+    grid_size: [8, 8]
+    n_channels: 64
+    sampling_rate: 10        # Hz
+    dead_pixel_threshold: 5.0   # std deviations from median
+    background_window: 100      # frames for running baseline
+    normalization: "zscore"
+
+  # --- ToF ---
+  tof:
+    grid_size: [8, 8]
+    n_channels: 64
+    sampling_rate: 10        # Hz
+    min_depth_mm: 0
+    max_depth_mm: 1000
+    invalid_value: -1        # raw invalid return value
+    normalization: "minmax"
+
+  # --- Feature Engineering ---
+  feature_engineering:
+    enabled: false           # set true to enable extra features
+    imu:
+      enmo: true
+      jerk: true
+      tilt: false
+      stft: false
+    thermopile:
+      centroid: true
+      spread: true
+      entropy: false
+    tof:
+      gradients: true
+      motion_flow: false
+
+  # --- Split ---
+  split:
+    train_ratio: 0.70
+    val_ratio: 0.15
+    test_ratio: 0.15
+    stratify: true
+    subject_aware: true       # prevent data leakage across subjects
+    seed: 42
+
+  # --- DataLoader ---
+  dataloader:
+    batch_size: 32
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+    prefetch_factor: 2
+
+  # --- Augmentation (training only) ---
+  augmentation:
+    enabled: true
+    random_time_warp:
+      enabled: true
+      sigma: 0.2
+    random_channel_noise:
+      enabled: true
+      sigma: 0.05
+    random_modality_drop:
+      enabled: false          # enable in Phase 6
+      p_drop: 0.2
+    random_time_shift:
+      enabled: true
+      max_shift: 20
+    magnitude_scaling:
+      enabled: true
+      range: [0.9, 1.1]

@@ -1,0 +1,105 @@
+# ============================================================
+# ARST — .gitignore
+# ============================================================
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+MANIFEST
+
+# ── Environments ────────────────────────────────────────────
+.env
+.venv
+env/
+venv/
+ENV/
+.conda/
+
+# ── Data — NEVER commit raw or processed data ───────────────
+data/raw/
+data/processed/
+data/interim/
+data/external/
+*.parquet
+*.csv
+*.h5
+*.hdf5
+*.npz
+*.npy
+
+# ── Model Checkpoints ────────────────────────────────────────
+experiments/*/checkpoints/
+outputs/checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+
+# ── ONNX / Deployment Artifacts ─────────────────────────────
+deployment/models/
+*.onnx
+
+# ── Logs ────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── W&B ─────────────────────────────────────────────────────
+wandb/
+.wandb/
+
+# ── Hydra ───────────────────────────────────────────────────
+outputs/
+multirun/
+.hydra/
+
+# ── Jupyter ─────────────────────────────────────────────────
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ── Reports (generated outputs) ─────────────────────────────
+reports/figures/
+reports/*.pdf
+reports/*.html
+
+# ── IDEs ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Testing ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc
+
+# ── MyPy ────────────────────────────────────────────────────
+.mypy_cache/
+
+# ── Ruff ────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Kaggle credentials ───────────────────────────────────────
+kaggle.json
+.kaggle/
+
+# ── OS ───────────────────────────────────────────────────────
+*.DS_Store
+desktop.ini
+
+# ── Secrets / API keys ───────────────────────────────────────
+.env.local
+.env.*.local
+secrets/
+*.key

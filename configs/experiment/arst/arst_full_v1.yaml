@@ -1,0 +1,41 @@
+# ============================================================
+# ARST Full Experiment Configuration
+# Inherits from: model/arst_full, training/default, data/default
+# ============================================================
+
+# @package _global_
+
+defaults:
+  - data: default
+  - model: arst_full
+  - training: default
+  - _self_
+
+experiment:
+  name: "arst_full_v1"
+  description: "Full ARST model with sigmoid reliability and AFT fusion"
+  tags:
+    - arst
+    - reliability
+    - adaptive_fusion
+    - phase5
+
+# Override specific values for this experiment
+model:
+  reliability:
+    activation: "sigmoid"
+  fusion:
+    type: "adaptive"
+    use_reliability_bias: true
+
+training:
+  loss:
+    lambda_rel: 0.1
+    lambda_ent: 0.01
+  epochs: 100
+  optimizer:
+    lr: 1.0e-4
+
+wandb:
+  group: "phase5_arst"
+  job_type: "train"

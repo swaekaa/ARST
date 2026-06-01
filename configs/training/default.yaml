@@ -1,0 +1,86 @@
+# ============================================================
+# Default Training Configuration
+# ============================================================
+
+# @package _global_
+
+defaults:
+  - _self_
+
+training:
+  # --- Core ---
+  epochs: 100
+  seed: 42
+  deterministic: false         # true reduces speed; false is acceptable for research
+
+  # --- Optimization ---
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-4
+    weight_decay: 1.0e-2
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  scheduler:
+    type: "cosine_with_warmup"
+    warmup_epochs: 5
+    min_lr: 1.0e-6
+    last_epoch: -1
+
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0
+    norm_type: 2
+
+  # --- Batch / Accumulation ---
+  batch_size: 32               # per GPU
+  accumulation_steps: 4        # effective batch = 128
+
+  # --- Precision ---
+  mixed_precision: true        # AMP — essential for RTX 3060 4GB
+  compile: false               # torch.compile (experimental; may not help on smaller models)
+
+  # --- Loss ---
+  loss:
+    cls_type: "focal"          # "focal" | "cross_entropy"
+    focal:
+      gamma: 2.0
+      reduction: "mean"
+    use_class_weights: true
+    lambda_rel: 0.1            # Reliability regularization weight
+    lambda_ent: 0.01           # Entropy component of reliability loss
+
+  # --- Early Stopping ---
+  early_stopping:
+    enabled: true
+    patience: 15
+    monitor: "val/f1_macro"
+    mode: "max"
+    min_delta: 0.001
+
+  # --- Checkpointing ---
+  checkpointing:
+    enabled: true
+    save_top_k: 3
+    monitor: "val/f1_macro"
+    mode: "max"
+    every_n_epochs: 1
+
+  # --- W&B Logging ---
+  wandb:
+    enabled: true
+    project: "arst-behavior-recognition"
+    entity: null               # set your W&B entity here
+    log_freq: 10               # log every N steps
+    log_reliability_histograms: true
+    watch_model: false         # gradient/param histograms (expensive)
+
+  # --- Memory Optimization (RTX 3060 4GB) ---
+  memory:
+    gradient_checkpointing: false   # enable if OOM
+    empty_cache_freq: 100           # torch.cuda.empty_cache() every N batches
+
+  # --- Test-Time Augmentation ---
+  tta:
+    enabled: false
+    n_augmentations: 4
