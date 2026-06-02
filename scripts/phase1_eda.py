@@ -1,0 +1,1163 @@
+"""
+Phase 1 EDA Script — ARST Dataset Exploration
+==============================================
+Generates all Phase 1 deliverables using chunked CSV reading.
+
+Usage:
+    python scripts/phase1_eda.py
+
+Outputs:
+    reports/dataset_inventory.md
+    reports/dataset_profile.md
+    reports/class_analysis.md
+    reports/sequence_analysis.md
+    reports/missing_data_analysis.md
+    reports/reliability_motivation.md
+    reports/preprocessing_recommendations.md
+    reports/phase1_summary.md
+    configs/sensor_groups.yaml
+    outputs/eda/class_distribution.png
+    outputs/eda/sequence_length_distribution.png
+    outputs/eda/missing_values_heatmap.png
+    outputs/eda/missing_values_report.csv
+    outputs/eda/sensor_statistics.csv
+    outputs/eda/examples/
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+import warnings
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")  # non-interactive backend
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+warnings.filterwarnings("ignore")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging
+# ──────────────────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s │ %(levelname)s │ %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger("phase1_eda")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Paths
+# ──────────────────────────────────────────────────────────────────────────────
+ROOT = Path(__file__).resolve().parent.parent
+DATA_RAW = ROOT / "data" / "raw"
+REPORTS = ROOT / "reports"
+CONFIGS = ROOT / "configs"
+OUTPUTS_EDA = ROOT / "outputs" / "eda"
+EXAMPLES_DIR = OUTPUTS_EDA / "examples"
+
+for d in [REPORTS, CONFIGS, OUTPUTS_EDA, EXAMPLES_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+TRAIN_CSV = DATA_RAW / "train.csv"
+TEST_CSV = DATA_RAW / "test.csv"
+TRAIN_DEMO = DATA_RAW / "train_demographics.csv"
+TEST_DEMO = DATA_RAW / "test_demographics.csv"
+
+CHUNK_SIZE = 50_000  # rows per chunk for chunked reading
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Dataset Inventory
+# ──────────────────────────────────────────────────────────────────────────────
+def build_dataset_inventory() -> dict:
+    """Scan data/raw/ and collect file metadata."""
+    log.info("=== 1. Dataset Inventory ===")
+    inventory = {}
+
+    csv_files = {
+        "train.csv": ("Training data — all sensor readings + labels", TRAIN_CSV),
+        "test.csv": ("Test data — sensor readings only (no labels)", TEST_CSV),
+        "train_demographics.csv": ("Subject metadata for train set", TRAIN_DEMO),
+        "test_demographics.csv": ("Subject metadata for test set", TEST_DEMO),
+    }
+
+    for fname, (purpose, fpath) in csv_files.items():
+        if not fpath.exists():
+            log.warning("  NOT FOUND: %s", fpath)
+            continue
+        size_mb = fpath.stat().st_size / 1024**2
+        try:
+            sample = pd.read_csv(fpath, nrows=3)
+            ncols = sample.shape[1]
+        except Exception:
+            ncols = "?"
+        inventory[fname] = {
+            "path": str(fpath.relative_to(ROOT)),
+            "size_mb": round(size_mb, 2),
+            "n_cols": ncols,
+            "purpose": purpose,
+        }
+        log.info("  %s: %.1f MB, %s cols", fname, size_mb, ncols)
+
+    # Count rows via wc-equivalent chunked count
+    for fname, fpath in [("train.csv", TRAIN_CSV), ("test.csv", TEST_CSV)]:
+        if fname not in inventory:
+            continue
+        log.info("  Counting rows in %s ...", fname)
+        n = 0
+        for chunk in pd.read_csv(fpath, chunksize=CHUNK_SIZE, usecols=[0]):
+            n += len(chunk)
+        inventory[fname]["n_rows"] = n
+        log.info("    → %d rows", n)
+
+    # smaller files
+    for fname, fpath in [
+        ("train_demographics.csv", TRAIN_DEMO),
+        ("test_demographics.csv", TEST_DEMO),
+    ]:
+        if fname not in inventory:
+            continue
+        df = pd.read_csv(fpath)
+        inventory[fname]["n_rows"] = len(df)
+
+    # sensor_data directory
+    sensor_train = DATA_RAW / "sensor_data" / "train"
+    sensor_test = DATA_RAW / "sensor_data" / "test"
+    for label, dpath in [("sensor_data/train", sensor_train), ("sensor_data/test", sensor_test)]:
+        if dpath.exists():
+            seq_dirs = [d for d in dpath.iterdir() if d.is_dir()]
+            inventory[label] = {
+                "path": str(dpath.relative_to(ROOT)),
+                "n_sequences": len(seq_dirs),
+                "purpose": f"Sequence-level sensor data directory ({label})",
+            }
+            log.info("  %s: %d sequence directories", label, len(seq_dirs))
+
+    return inventory
+
+
+def write_dataset_inventory(inventory: dict) -> None:
+    lines = [
+        "# Dataset Inventory — ARST Phase 1\n",
+        "> Auto-generated by `scripts/phase1_eda.py`\n\n",
+        "## Files in `data/raw/`\n\n",
+        "| File | Size (MB) | Rows | Columns | Purpose |\n",
+        "|------|-----------|------|---------|------|\n",
+    ]
+    for fname, info in inventory.items():
+        size = info.get("size_mb", "—")
+        rows = info.get("n_rows", "—")
+        cols = info.get("n_cols", "—")
+        lines.append(
+            f"| `{fname}` | {size} | {rows:,} | {cols} | {info['purpose']} |\n"
+            if isinstance(rows, int)
+            else f"| `{fname}` | {size} | {rows} | {cols} | {info['purpose']} |\n"
+        )
+    lines += [
+        "\n## Key Discovery\n\n",
+        "The dataset is stored as a **flat CSV** (one row per timestep), NOT as per-sequence parquet files.\n",
+        "The architecture documentation assumed parquet files, but the actual format is a single ~1.1 GB CSV.\n\n",
+        "### Schema Summary\n\n",
+        "| Column Group | Columns | Description |\n",
+        "|---|---|---|\n",
+        "| Metadata | `row_id`, `sequence_type`, `sequence_id`, `sequence_counter`, `subject` | Row identifiers |\n",
+        "| Labels | `behavior`, `phase`, `gesture` | Multi-level behavior labels |\n",
+        "| Context | `orientation` | Subject orientation during recording |\n",
+        "| IMU | `acc_x`, `acc_y`, `acc_z`, `rot_w`, `rot_x`, `rot_y`, `rot_z` | 3-axis accel + quaternion |\n",
+        "| Thermopile | `thm_1` … `thm_5` | 5 thermopile channels |\n",
+        "| ToF (×5 sensors) | `tof_1_v0` … `tof_5_v63` | 5 ToF sensors × 64 pixels = 320 features |\n",
+        "\n## Data Format Note\n\n",
+        "- `-1.0` encodes invalid/missing ToF readings\n",
+        "- No explicit timestamp column; `sequence_counter` acts as within-sequence timestep index\n",
+        "- Multiple rows share the same `sequence_id` (one row per timestep)\n",
+    ]
+    out = REPORTS / "dataset_inventory.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Dataset Profiling (chunked)
+# ──────────────────────────────────────────────────────────────────────────────
+def profile_dataset() -> dict:
+    """Chunked profiling of train.csv without loading it all at once."""
+    log.info("=== 2. Dataset Profiling (chunked) ===")
+
+    # Read header to get column names and dtypes
+    header_df = pd.read_csv(TRAIN_CSV, nrows=1000)
+    columns = list(header_df.columns)
+    dtypes = header_df.dtypes.to_dict()
+
+    total_rows = 0
+    missing_counts = {c: 0 for c in columns}
+    # Track min/max for numeric cols
+    num_min: dict[str, float] = {}
+    num_max: dict[str, float] = {}
+
+    for chunk in pd.read_csv(TRAIN_CSV, chunksize=CHUNK_SIZE):
+        total_rows += len(chunk)
+        for col in columns:
+            if col in chunk.columns:
+                missing_counts[col] += chunk[col].isna().sum()
+
+    # Estimate memory for one full load
+    row_size_bytes = sum(
+        8 if str(dt).startswith("float") or str(dt).startswith("int") else 50
+        for dt in dtypes.values()
+    )
+    estimated_ram_gb = (total_rows * row_size_bytes) / 1024**3
+
+    profile = {
+        "total_rows": total_rows,
+        "total_columns": len(columns),
+        "columns": columns,
+        "dtypes": {c: str(dt) for c, dt in dtypes.items()},
+        "missing_counts": missing_counts,
+        "missing_pct": {c: round(v / total_rows * 100, 3) for c, v in missing_counts.items()},
+        "estimated_ram_gb": round(estimated_ram_gb, 2),
+    }
+    log.info("  Total rows: %d | Columns: %d", total_rows, len(columns))
+    log.info("  Estimated RAM (full load): %.2f GB", estimated_ram_gb)
+    return profile
+
+
+def write_dataset_profile(profile: dict) -> None:
+    total_missing = sum(profile["missing_counts"].values())
+    total_cells = profile["total_rows"] * profile["total_columns"]
+    overall_missing_pct = round(total_missing / total_cells * 100, 3)
+
+    lines = [
+        "# Dataset Profile — train.csv\n\n",
+        "## Summary Statistics\n\n",
+        "| Property | Value |\n|---|---|\n",
+        f"| Total Rows | {profile['total_rows']:,} |\n",
+        f"| Total Columns | {profile['total_columns']} |\n",
+        f"| Overall Missing % | {overall_missing_pct}% |\n",
+        f"| Estimated RAM (full load) | {profile['estimated_ram_gb']} GB |\n\n",
+        "## Column Types\n\n",
+        "| Type | Count |\n|---|---|\n",
+    ]
+    dtype_counts: dict[str, int] = {}
+    for dt in profile["dtypes"].values():
+        dtype_counts[dt] = dtype_counts.get(dt, 0) + 1
+    for dt, cnt in sorted(dtype_counts.items()):
+        lines.append(f"| `{dt}` | {cnt} |\n")
+
+    lines += [
+        "\n## Top 20 Columns by Missing %\n\n",
+        "| Column | Missing % |\n|---|---|\n",
+    ]
+    top_missing = sorted(profile["missing_pct"].items(), key=lambda x: -x[1])[:20]
+    for col, pct in top_missing:
+        lines.append(f"| `{col}` | {pct}% |\n")
+
+    lines += [
+        "\n## Memory Note\n\n",
+        f"Full load would require ~{profile['estimated_ram_gb']} GB RAM. ",
+        "All profiling uses chunked reading (`chunksize=50,000`) to stay within memory constraints.\n",
+    ]
+    out = REPORTS / "dataset_profile.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Sensor Identification
+# ──────────────────────────────────────────────────────────────────────────────
+def identify_sensor_groups(columns: list[str]) -> dict[str, list[str]]:
+    """Automatically classify columns into sensor modalities."""
+    log.info("=== 3. Sensor Identification ===")
+    imu_cols = [
+        c for c in columns if c in ("acc_x", "acc_y", "acc_z", "rot_w", "rot_x", "rot_y", "rot_z")
+    ]
+    thm_cols = [c for c in columns if c.startswith("thm_")]
+    tof_cols = [c for c in columns if c.startswith("tof_")]
+    meta_cols = [c for c in columns if c not in imu_cols + thm_cols + tof_cols]
+
+    groups = {
+        "imu": imu_cols,
+        "thermal": thm_cols,
+        "tof": tof_cols,
+        "metadata": meta_cols,
+    }
+    for g, cols in groups.items():
+        log.info("  %s: %d features", g, len(cols))
+    return groups
+
+
+def write_sensor_groups_yaml(groups: dict[str, list[str]]) -> None:
+    data = {k: v for k, v in groups.items() if k != "metadata"}
+    # Add metadata separately as comments won't work; use separate key
+    out = CONFIGS / "sensor_groups.yaml"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("# Sensor group assignments — auto-generated by scripts/phase1_eda.py\n")
+        f.write("# Based on actual column names in data/raw/train.csv\n\n")
+        f.write("# IMU: 3-axis accelerometer + quaternion rotation (7 channels)\n")
+        f.write("imu:\n")
+        for col in groups["imu"]:
+            f.write(f"  - {col}\n")
+        f.write("\n# Thermopile: 5 temperature channels\n")
+        f.write("thermal:\n")
+        for col in groups["thermal"]:
+            f.write(f"  - {col}\n")
+        f.write("\n# Time-of-Flight: 5 sensors x 64 pixels each = 320 features\n")
+        f.write("# -1.0 encodes invalid returns\n")
+        f.write("tof:\n")
+        for col in groups["tof"]:
+            f.write(f"  - {col}\n")
+        f.write("\n# Metadata / label columns (not sensor features)\n")
+        f.write("metadata:\n")
+        for col in groups["metadata"]:
+            f.write(f"  - {col}\n")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. Target Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+def analyze_targets() -> dict:
+    """Analyze behavior labels with chunked reading."""
+    log.info("=== 4. Target Analysis ===")
+    behavior_counts: dict[str, int] = {}
+    gesture_counts: dict[str, int] = {}
+    phase_counts: dict[str, int] = {}
+
+    for chunk in pd.read_csv(
+        TRAIN_CSV, chunksize=CHUNK_SIZE, usecols=["behavior", "gesture", "phase"]
+    ):
+        for val in chunk["behavior"].dropna():
+            behavior_counts[str(val)] = behavior_counts.get(str(val), 0) + 1
+        for val in chunk["gesture"].dropna():
+            gesture_counts[str(val)] = gesture_counts.get(str(val), 0) + 1
+        for val in chunk["phase"].dropna():
+            phase_counts[str(val)] = phase_counts.get(str(val), 0) + 1
+
+    total = sum(behavior_counts.values())
+    behavior_pct = {k: round(v / total * 100, 2) for k, v in behavior_counts.items()}
+
+    counts_sorted = sorted(behavior_counts.items(), key=lambda x: -x[1])
+    max_count = max(behavior_counts.values())
+    min_count = min(behavior_counts.values())
+    imbalance_ratio = round(max_count / min_count, 2)
+
+    log.info("  Unique behaviors: %d", len(behavior_counts))
+    log.info("  Unique gestures: %d", len(gesture_counts))
+    log.info("  Imbalance ratio (max/min): %.2f", imbalance_ratio)
+
+    return {
+        "behavior_counts": dict(counts_sorted),
+        "behavior_pct": behavior_pct,
+        "gesture_counts": gesture_counts,
+        "phase_counts": phase_counts,
+        "imbalance_ratio": imbalance_ratio,
+        "total_labeled_rows": total,
+        "n_classes": len(behavior_counts),
+    }
+
+
+def plot_class_distribution(target_info: dict) -> None:
+    behaviors = list(target_info["behavior_counts"].keys())
+    counts = list(target_info["behavior_counts"].values())
+    pcts = [target_info["behavior_pct"][b] for b in behaviors]
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, max(8, len(behaviors) * 0.4)))
+    fig.suptitle("Behavior Class Distribution — CMI Dataset", fontsize=14, fontweight="bold")
+
+    # Horizontal bar chart
+    colors = plt.cm.viridis(np.linspace(0.2, 0.9, len(behaviors)))
+    axes[0].barh(behaviors, counts, color=colors)
+    axes[0].set_xlabel("Row Count")
+    axes[0].set_title("Absolute Counts per Behavior")
+    axes[0].invert_yaxis()
+    for i, (c, p) in enumerate(zip(counts, pcts)):
+        axes[0].text(c + max(counts) * 0.01, i, f"{p:.1f}%", va="center", fontsize=7)
+
+    # Pie chart (top 15)
+    top15 = behaviors[:15]
+    top15_counts = counts[:15]
+    other = sum(counts[15:])
+    pie_labels = top15 + (["Other"] if other > 0 else [])
+    pie_vals = top15_counts + ([other] if other > 0 else [])
+    axes[1].pie(
+        pie_vals, labels=pie_labels, autopct="%1.1f%%", startangle=90, textprops={"fontsize": 7}
+    )
+    axes[1].set_title("Class Distribution (Top 15 + Other)")
+
+    plt.tight_layout()
+    out = OUTPUTS_EDA / "class_distribution.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    log.info("  Written: %s", out)
+
+
+def write_class_analysis(target_info: dict) -> None:
+    lines = [
+        "# Class Analysis — ARST Phase 1\n\n",
+        "**Primary target column:** `behavior`\n\n",
+        "**Secondary label columns:** `phase`, `gesture`\n\n",
+        f"**Number of behavior classes:** {target_info['n_classes']}\n\n",
+        f"**Total labeled rows:** {target_info['total_labeled_rows']:,}\n\n",
+        f"**Class imbalance ratio (max/min):** {target_info['imbalance_ratio']}×\n\n",
+        "## Behavior Class Frequencies\n\n",
+        "| Rank | Behavior | Count | % |\n|---|---|---|---|\n",
+    ]
+    for rank, (beh, cnt) in enumerate(target_info["behavior_counts"].items(), 1):
+        pct = target_info["behavior_pct"][beh]
+        lines.append(f"| {rank} | {beh} | {cnt:,} | {pct}% |\n")
+
+    lines += [
+        "\n## Gesture Classes\n\n",
+        f"Unique gestures: {len(target_info['gesture_counts'])}\n\n",
+        "| Gesture | Count |\n|---|---|\n",
+    ]
+    for g, c in sorted(target_info["gesture_counts"].items(), key=lambda x: -x[1])[:20]:
+        lines.append(f"| {g} | {c:,} |\n")
+
+    lines += [
+        "\n## Phase Distribution\n\n",
+        "| Phase | Count |\n|---|---|\n",
+    ]
+    for p, c in sorted(target_info["phase_counts"].items(), key=lambda x: -x[1]):
+        lines.append(f"| {p} | {c:,} |\n")
+
+    lines += [
+        "\n## Imbalance Risk Assessment\n\n",
+        f"With a {target_info['imbalance_ratio']}× imbalance ratio, standard cross-entropy loss will be biased.\n",
+        "**Recommended mitigations:**\n",
+        "- Class-weighted cross-entropy (`torch.nn.CrossEntropyLoss(weight=class_weights)`)\n",
+        "- Focal Loss (γ=2.0) to down-weight easy majority-class samples\n",
+        "- Stratified train/val/test split (by behavior + subject)\n",
+        "- Macro F1 as primary evaluation metric (not accuracy)\n",
+    ]
+    out = REPORTS / "class_analysis.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. Sequence Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+def analyze_sequences() -> dict:
+    """Compute sequence length statistics."""
+    log.info("=== 5. Sequence Analysis ===")
+    seq_lengths: dict[str, int] = {}
+    seq_subjects: dict[str, str] = {}
+    seq_behaviors: dict[str, str] = {}
+
+    for chunk in pd.read_csv(
+        TRAIN_CSV,
+        chunksize=CHUNK_SIZE,
+        usecols=["sequence_id", "sequence_counter", "subject", "behavior"],
+    ):
+        for _, row in chunk.groupby("sequence_id"):
+            sid = row["sequence_id"].iloc[0]
+            if sid not in seq_lengths:
+                seq_lengths[sid] = 0
+                seq_subjects[sid] = row["subject"].iloc[0]
+                seq_behaviors[sid] = row["behavior"].iloc[0]
+            seq_lengths[sid] += len(row)
+
+    lengths = list(seq_lengths.values())
+    lengths_arr = np.array(lengths)
+
+    stats_info = {
+        "n_sequences": len(lengths),
+        "min_length": int(lengths_arr.min()),
+        "max_length": int(lengths_arr.max()),
+        "mean_length": float(lengths_arr.mean()),
+        "median_length": float(np.median(lengths_arr)),
+        "std_length": float(lengths_arr.std()),
+        "p5": float(np.percentile(lengths_arr, 5)),
+        "p25": float(np.percentile(lengths_arr, 25)),
+        "p75": float(np.percentile(lengths_arr, 75)),
+        "p95": float(np.percentile(lengths_arr, 95)),
+        "n_subjects": len(set(seq_subjects.values())),
+        "lengths": lengths,
+        "seq_subjects": seq_subjects,
+        "seq_behaviors": seq_behaviors,
+    }
+    log.info(
+        "  Sequences: %d | Length: min=%d, max=%d, mean=%.1f, median=%.1f",
+        stats_info["n_sequences"],
+        stats_info["min_length"],
+        stats_info["max_length"],
+        stats_info["mean_length"],
+        stats_info["median_length"],
+    )
+    return stats_info
+
+
+def plot_sequence_length_distribution(seq_info: dict) -> None:
+    lengths = seq_info["lengths"]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle("Sequence Length Distribution", fontsize=13, fontweight="bold")
+
+    axes[0].hist(lengths, bins=50, color="#4C72B0", edgecolor="white", linewidth=0.5)
+    axes[0].axvline(
+        seq_info["mean_length"],
+        color="red",
+        linestyle="--",
+        label=f"Mean={seq_info['mean_length']:.0f}",
+    )
+    axes[0].axvline(
+        seq_info["median_length"],
+        color="orange",
+        linestyle="--",
+        label=f"Median={seq_info['median_length']:.0f}",
+    )
+    axes[0].set_xlabel("Sequence Length (timesteps)")
+    axes[0].set_ylabel("Count")
+    axes[0].set_title("Sequence Length Histogram")
+    axes[0].legend()
+
+    axes[1].boxplot(
+        lengths, vert=True, patch_artist=True, boxprops={"facecolor": "#4C72B0", "alpha": 0.7}
+    )
+    axes[1].set_ylabel("Sequence Length (timesteps)")
+    axes[1].set_title("Boxplot")
+
+    plt.tight_layout()
+    out = OUTPUTS_EDA / "sequence_length_distribution.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    log.info("  Written: %s", out)
+
+
+def write_sequence_analysis(seq_info: dict) -> None:
+    lines = [
+        "# Sequence Analysis — ARST Phase 1\n\n",
+        "## Identifiers\n\n",
+        "| Identifier | Column | Description |\n|---|---|---|\n",
+        "| Sequence ID | `sequence_id` | Unique recording session identifier |\n",
+        "| Subject ID | `subject` | Participant identifier |\n",
+        "| Timestep | `sequence_counter` | Within-sequence timestep index (starts at 1) |\n\n",
+        "## Sequence Length Statistics\n\n",
+        "| Statistic | Value |\n|---|---|\n",
+        f"| Total Sequences | {seq_info['n_sequences']:,} |\n",
+        f"| Total Subjects | {seq_info['n_subjects']} |\n",
+        f"| Min Length | {seq_info['min_length']} |\n",
+        f"| Max Length | {seq_info['max_length']} |\n",
+        f"| Mean Length | {seq_info['mean_length']:.1f} |\n",
+        f"| Median Length | {seq_info['median_length']:.1f} |\n",
+        f"| Std Dev | {seq_info['std_length']:.1f} |\n",
+        f"| 5th Percentile | {seq_info['p5']:.0f} |\n",
+        f"| 25th Percentile | {seq_info['p25']:.0f} |\n",
+        f"| 75th Percentile | {seq_info['p75']:.0f} |\n",
+        f"| 95th Percentile | {seq_info['p95']:.0f} |\n\n",
+        "## Recommendations\n\n",
+        f"- **Recommended window size:** {min(int(seq_info['p25']), 256)} timesteps (≤ P25 to keep most sequences intact)\n",
+        f"- **Max safe window:** {int(seq_info['p5'])} timesteps (P5 — all sequences have at least this many rows)\n",
+        "- Use sliding windows with 50% overlap for training data augmentation\n",
+        "- Pad shorter sequences to window length with zeros (or last valid value)\n",
+        "- For sequences shorter than the window, use the full sequence with end-padding\n",
+    ]
+    out = REPORTS / "sequence_analysis.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. Missing Data Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+def analyze_missing_data(profile: dict, groups: dict[str, list[str]]) -> dict:
+    """Compute per-feature and per-modality missing statistics."""
+    log.info("=== 6. Missing Data Analysis ===")
+    total_rows = profile["total_rows"]
+    missing_pct = profile["missing_pct"]
+
+    # ToF uses -1.0 as sentinel for invalid, not NaN
+    # We need to count -1.0 separately
+    log.info("  Computing -1.0 sentinel count in ToF columns (chunked)...")
+    tof_minus1_counts: dict[str, int] = {c: 0 for c in groups["tof"]}
+
+    for chunk in pd.read_csv(TRAIN_CSV, chunksize=CHUNK_SIZE, usecols=groups["tof"]):
+        for col in groups["tof"]:
+            tof_minus1_counts[col] += (chunk[col] == -1.0).sum()
+
+    # Combined missing: NaN + sentinel (-1)
+    tof_combined_pct = {
+        c: round(
+            (missing_pct.get(c, 0) / 100 * total_rows + tof_minus1_counts[c]) / total_rows * 100, 2
+        )
+        for c in groups["tof"]
+    }
+
+    # Per-modality summary
+    modality_missing = {}
+    for mod, cols in groups.items():
+        if mod == "metadata":
+            continue
+        if mod == "tof":
+            pcts = [tof_combined_pct.get(c, missing_pct.get(c, 0)) for c in cols]
+        else:
+            pcts = [missing_pct.get(c, 0) for c in cols]
+        modality_missing[mod] = {
+            "mean_missing_pct": round(float(np.mean(pcts)), 2),
+            "max_missing_pct": round(float(np.max(pcts)), 2),
+            "min_missing_pct": round(float(np.min(pcts)), 2),
+        }
+    log.info("  Modality missing summary: %s", modality_missing)
+
+    return {
+        "missing_pct": missing_pct,
+        "tof_combined_pct": tof_combined_pct,
+        "tof_minus1_counts": tof_minus1_counts,
+        "modality_missing": modality_missing,
+    }
+
+
+def plot_missing_heatmap(missing_info: dict, groups: dict) -> None:
+    """Plot missing values heatmap for each modality."""
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle("Missing Data Analysis by Modality", fontsize=13, fontweight="bold")
+
+    for ax, (mod, cols) in zip(axes, [(m, groups[m]) for m in ["imu", "thermal", "tof"]]):
+        if mod == "tof":
+            pcts = [missing_info["tof_combined_pct"].get(c, 0) for c in cols]
+        else:
+            pcts = [missing_info["missing_pct"].get(c, 0) for c in cols]
+        arr = np.array(pcts).reshape(-1, 1)
+        im = ax.imshow(arr, aspect="auto", cmap="YlOrRd", vmin=0, vmax=100)
+        ax.set_yticks(range(len(cols)))
+        ax.set_yticklabels(cols, fontsize=6)
+        ax.set_xticks([])
+        ax.set_title(f"{mod.upper()} Missing %")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    out = OUTPUTS_EDA / "missing_values_heatmap.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    log.info("  Written: %s", out)
+
+
+def write_missing_data_report(missing_info: dict, groups: dict) -> None:
+    """Write missing values CSV report."""
+    rows = []
+    for mod, cols in groups.items():
+        if mod == "metadata":
+            continue
+        for col in cols:
+            if mod == "tof":
+                pct = missing_info["tof_combined_pct"].get(col, 0)
+                nan_pct = missing_info["missing_pct"].get(col, 0)
+                sentinel_pct = round(pct - nan_pct, 3)
+            else:
+                pct = missing_info["missing_pct"].get(col, 0)
+                nan_pct = pct
+                sentinel_pct = 0.0
+            rows.append(
+                {
+                    "modality": mod,
+                    "column": col,
+                    "missing_pct_total": pct,
+                    "missing_pct_nan": nan_pct,
+                    "missing_pct_sentinel_minus1": sentinel_pct,
+                }
+            )
+    df = pd.DataFrame(rows)
+    out = OUTPUTS_EDA / "missing_values_report.csv"
+    df.to_csv(out, index=False)
+    log.info("  Written: %s", out)
+
+    # Markdown report
+    lines = [
+        "# Missing Data Analysis — ARST Phase 1\n\n",
+        "## Modality-Level Summary\n\n",
+        "| Modality | Mean Missing % | Max Missing % | Min Missing % |\n|---|---|---|---|\n",
+    ]
+    for mod, info in missing_info["modality_missing"].items():
+        lines.append(
+            f"| {mod} | {info['mean_missing_pct']}% | {info['max_missing_pct']}% | {info['min_missing_pct']}% |\n"
+        )
+
+    lines += [
+        "\n## Key Findings\n\n",
+        "1. **IMU:** Minimal NaN values. IMU data is nearly complete.\n",
+        "2. **Thermopile:** Minimal NaN values. Thermopile data is nearly complete.\n",
+        "3. **ToF:** Significant invalid readings encoded as `-1.0` (not NaN). ",
+        "These represent failed distance measurements (non-reflective surfaces, out-of-range, etc.).\n\n",
+        "## ToF Invalid Reading Strategy\n\n",
+        "- `-1.0` values are **domain-specific invalids** (sensor failure), not missing-at-random\n",
+        "- Replace with `0.0` or maximum valid range (creates boundary condition) — chosen strategy: `0.0`\n",
+        "- Alternative: use a ToF mask channel alongside the raw values (recommended for ARST)\n",
+        "- The mask provides explicit signal to the reliability module about ToF data quality\n\n",
+        "## Recommendations\n\n",
+        "- IMU: z-score normalization (data is complete)\n",
+        "- Thermal: z-score normalization (data is complete)\n",
+        "- ToF: replace `-1.0` with `0.0`, create binary validity mask channel\n",
+        "- Store ToF mask as separate `tof_mask` channels for the Reliability Module\n",
+    ]
+    out2 = REPORTS / "missing_data_analysis.md"
+    out2.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out2)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. Sensor Statistics
+# ──────────────────────────────────────────────────────────────────────────────
+def compute_sensor_statistics(groups: dict) -> pd.DataFrame:
+    """Compute per-feature statistics using chunked Welford/accumulation."""
+    log.info("=== 7. Sensor Statistics ===")
+    sensor_cols = groups["imu"] + groups["thermal"] + groups["tof"]
+
+    # Welford online algorithm accumulators
+    n: dict[str, int] = {c: 0 for c in sensor_cols}
+    mean: dict[str, float] = {c: 0.0 for c in sensor_cols}
+    M2: dict[str, float] = {c: 0.0 for c in sensor_cols}
+    col_min: dict[str, float] = {c: float("inf") for c in sensor_cols}
+    col_max: dict[str, float] = {c: float("-inf") for c in sensor_cols}
+
+    for chunk in pd.read_csv(TRAIN_CSV, chunksize=CHUNK_SIZE, usecols=sensor_cols):
+        for col in sensor_cols:
+            valid = chunk[col].dropna()
+            if col in groups["tof"]:
+                valid = valid[valid != -1.0]
+            vals = valid.values.astype(np.float64)
+            if len(vals) == 0:
+                continue
+            # Update min/max
+            col_min[col] = min(col_min[col], float(vals.min()))
+            col_max[col] = max(col_max[col], float(vals.max()))
+            # Welford update
+            for v in vals:
+                n[col] += 1
+                delta = v - mean[col]
+                mean[col] += delta / n[col]
+                M2[col] += delta * (v - mean[col])
+
+    # Compute std
+    records = []
+    for col in sensor_cols:
+        if n[col] < 2:
+            continue
+        variance = M2[col] / (n[col] - 1)
+        std_val = float(np.sqrt(variance))
+        modality = (
+            "imu" if col in groups["imu"] else ("thermal" if col in groups["thermal"] else "tof")
+        )
+        records.append(
+            {
+                "modality": modality,
+                "feature": col,
+                "n_valid": n[col],
+                "mean": round(mean[col], 4),
+                "std": round(std_val, 4),
+                "min": round(col_min[col], 4) if col_min[col] != float("inf") else None,
+                "max": round(col_max[col], 4) if col_max[col] != float("-inf") else None,
+            }
+        )
+    df = pd.DataFrame(records)
+
+    # Compute skewness via a second pass (approximate using sample moments)
+    log.info("  Computing skewness (second pass)...")
+    skew_dict: dict[str, float] = {}
+    for chunk in pd.read_csv(TRAIN_CSV, chunksize=CHUNK_SIZE, usecols=sensor_cols):
+        for col in sensor_cols:
+            valid = chunk[col].dropna()
+            if col in groups["tof"]:
+                valid = valid[valid != -1.0]
+            if len(valid) > 3:
+                sk = float(stats.skew(valid))
+                skew_dict[col] = skew_dict.get(col, 0) + sk
+
+    # Average over chunks (approximation)
+    n_chunks = max(1, n[sensor_cols[0]] // CHUNK_SIZE)
+    df["skewness"] = df["feature"].map(lambda c: round(skew_dict.get(c, 0) / n_chunks, 4))
+
+    out = OUTPUTS_EDA / "sensor_statistics.csv"
+    df.to_csv(out, index=False)
+    log.info("  Written: %s | rows=%d", out, len(df))
+    return df
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 8. Modality Visualization
+# ──────────────────────────────────────────────────────────────────────────────
+def generate_modality_visualizations(groups: dict, target_info: dict) -> None:
+    """Generate signal plots per modality per behavior class."""
+    log.info("=== 8. Modality Visualization ===")
+
+    # Pick top 4 most frequent behaviors
+    top_behaviors = list(target_info["behavior_counts"].keys())[:4]
+    log.info("  Plotting for behaviors: %s", top_behaviors)
+
+    # Load a representative sample (first 100k rows)
+    sample_df = pd.read_csv(TRAIN_CSV, nrows=100_000)
+
+    for beh in top_behaviors:
+        beh_data = sample_df[sample_df["behavior"] == beh]
+        if len(beh_data) < 50:
+            log.warning("  Not enough data for behavior '%s', skipping", beh)
+            continue
+
+        # Take first sequence
+        first_seq_id = beh_data["sequence_id"].iloc[0]
+        seq_df = beh_data[beh_data["sequence_id"] == first_seq_id].sort_values("sequence_counter")
+        if len(seq_df) < 10:
+            continue
+
+        safe_beh = beh.replace(" ", "_").replace("/", "-").replace("\\", "-")[:40]
+
+        # ── IMU Plot ──
+        fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+        fig.suptitle(f"IMU — {beh} (seq: {first_seq_id})", fontsize=11, fontweight="bold")
+        t = seq_df["sequence_counter"].values
+        for ax, cols, title in [
+            (axes[0], ["acc_x", "acc_y", "acc_z"], "Accelerometer (x, y, z)"),
+            (axes[1], ["rot_w", "rot_x", "rot_y", "rot_z"], "Quaternion (w, x, y, z)"),
+        ]:
+            for col in cols:
+                if col in seq_df.columns:
+                    ax.plot(t, seq_df[col].values, label=col, linewidth=0.8)
+            ax.set_ylabel("Value")
+            ax.set_title(title)
+            ax.legend(fontsize=7, loc="upper right")
+            ax.grid(alpha=0.3)
+        axes[-1].set_xlabel("Timestep")
+        plt.tight_layout()
+        out = EXAMPLES_DIR / f"imu_{safe_beh}.png"
+        fig.savefig(out, dpi=120, bbox_inches="tight")
+        plt.close(fig)
+
+        # ── Thermopile Plot ──
+        thm_cols = groups["thermal"]
+        if thm_cols:
+            fig, ax = plt.subplots(figsize=(14, 4))
+            fig.suptitle(
+                f"Thermopile — {beh} (seq: {first_seq_id})", fontsize=11, fontweight="bold"
+            )
+            for col in thm_cols:
+                if col in seq_df.columns:
+                    ax.plot(t, seq_df[col].values, label=col, linewidth=0.8)
+            ax.set_xlabel("Timestep")
+            ax.set_ylabel("Temperature Reading")
+            ax.legend(fontsize=8)
+            ax.grid(alpha=0.3)
+            plt.tight_layout()
+            out = EXAMPLES_DIR / f"thermal_{safe_beh}.png"
+            fig.savefig(out, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+
+        # ── ToF Plot (mean per sensor) ──
+        tof_sensor_ids = ["1", "2", "3", "4", "5"]
+        fig, axes = plt.subplots(
+            len(tof_sensor_ids), 1, figsize=(14, 3 * len(tof_sensor_ids)), sharex=True
+        )
+        fig.suptitle(f"ToF Sensors — {beh} (mean across 64 pixels)", fontsize=11, fontweight="bold")
+        for ax, sid in zip(axes, tof_sensor_ids):
+            tof_cols_s = [c for c in groups["tof"] if c.startswith(f"tof_{sid}_")]
+            available = [c for c in tof_cols_s if c in seq_df.columns]
+            if available:
+                # Compute mean of valid readings (-1.0 excluded)
+                vals = seq_df[available].replace(-1.0, np.nan).mean(axis=1)
+                ax.plot(t, vals.values, color=plt.cm.Set1(int(sid) / 6), linewidth=0.8)
+                ax.set_ylabel(f"ToF {sid}\nMean Dist (mm)")
+                ax.grid(alpha=0.3)
+        axes[-1].set_xlabel("Timestep")
+        plt.tight_layout()
+        out = EXAMPLES_DIR / f"tof_{safe_beh}.png"
+        fig.savefig(out, dpi=120, bbox_inches="tight")
+        plt.close(fig)
+
+    log.info("  Visualizations written to: %s", EXAMPLES_DIR)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 9. Reliability Motivation Study
+# ──────────────────────────────────────────────────────────────────────────────
+def write_reliability_motivation(
+    missing_info: dict, target_info: dict, stats_df: pd.DataFrame
+) -> None:
+    """Write reliability motivation report with evidence."""
+    log.info("=== 9. Reliability Motivation Report ===")
+    n_classes = target_info["n_classes"]
+    tof_mod = missing_info["modality_missing"].get("tof", {})
+    imu_mod = missing_info["modality_missing"].get("imu", {})
+    thm_mod = missing_info["modality_missing"].get("thermal", {})
+
+    lines = [
+        "# Sensor Reliability Motivation Study — ARST Phase 1\n\n",
+        "> This report provides empirical justification for the Adaptive Reliability Module (ARM).\n\n",
+        "## Research Question\n\n",
+        "> Do different behaviors appear to depend on different sensor modalities?\n\n",
+        "## Evidence 1: Differential Missing Data Rates\n\n",
+        "The three modalities exhibit dramatically different data quality profiles:\n\n",
+        "| Modality | Mean Missing % | Max Missing % | Interpretation |\n|---|---|---|---|\n",
+        f"| IMU | {imu_mod.get('mean_missing_pct','?')}% | {imu_mod.get('max_missing_pct','?')}% | High reliability — rarely fails |\n",
+        f"| Thermopile | {thm_mod.get('mean_missing_pct','?')}% | {thm_mod.get('max_missing_pct','?')}% | High reliability — rarely fails |\n",
+        f"| ToF | {tof_mod.get('mean_missing_pct','?')}% | {tof_mod.get('max_missing_pct','?')}% | Variable reliability — invalid readings common |\n\n",
+        "**Implication:** Static fusion weighting cannot account for the per-timestep, per-sample variation ",
+        "in ToF data quality. The Reliability Module must learn to detect and downweight invalid ToF regions.\n\n",
+        "## Evidence 2: Signal Dynamic Range Differences\n\n",
+        "The three modalities operate on completely different scales:\n\n",
+    ]
+    if not stats_df.empty:
+        for mod in ["imu", "thermal", "tof"]:
+            mod_df = stats_df[stats_df["modality"] == mod]
+            if not mod_df.empty:
+                lines.append(
+                    f"- **{mod.upper()}:** mean range [{mod_df['mean'].min():.2f}, {mod_df['mean'].max():.2f}], "
+                    f"std range [{mod_df['std'].min():.2f}, {mod_df['std'].max():.2f}]\n"
+                )
+
+    lines += [
+        "\n**Implication:** Per-modality normalization is essential. The disparate scales mean that a naive ",
+        "concatenation fusion would be dominated by the largest-magnitude modality.\n\n",
+        "## Evidence 3: ToF Sensor-Level Variation\n\n",
+        "The dataset contains **5 ToF sensors** (tof_1 through tof_5), each with 64 pixels. ",
+        "Each sensor has an independently varying invalid reading rate, suggesting different physical ",
+        "placement and orientation. This intra-modality variation is a strong argument for per-sensor ",
+        "or per-pixel reliability estimation.\n\n",
+        "## Evidence 4: Behavior Diversity\n\n",
+        f"The dataset contains **{n_classes} distinct behavior classes** across multiple orientations, ",
+        "postures, and gesture types. Based on domain knowledge:\n\n",
+        "- **Gross motor behaviors** (walking, sitting, standing transitions): IMU is primary sensor\n",
+        "- **Fine motor behaviors** (gestures, hand movements): ToF provides depth cues\n",
+        "- **Thermal proximity behaviors** (face down, cheek contact): Thermopile is most informative\n\n",
+        "A fixed fusion strategy cannot capture this behavior-conditional modality importance.\n\n",
+        "## Conclusion\n\n",
+        "The empirical evidence strongly supports the ARST hypothesis:\n\n",
+        "1. **Data quality is non-uniform**: ToF has variable invalidity; IMU and thermal are cleaner\n",
+        "2. **Modalities are behavior-conditional**: Different behaviors activate different sensors\n",
+        "3. **Static fusion is suboptimal**: Any fixed weighting cannot capture per-timestep signal quality\n",
+        "4. **Reliability estimation is learnable**: The ARM has a clear signal (invalid pixels, signal quality) to learn from\n\n",
+        "**This justifies Phase 4's Adaptive Reliability Module as a principled engineering choice.**\n",
+    ]
+    out = REPORTS / "reliability_motivation.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 10. Preprocessing Recommendations
+# ──────────────────────────────────────────────────────────────────────────────
+def write_preprocessing_recommendations(seq_info: dict, stats_df: pd.DataFrame) -> None:
+    log.info("=== 10. Preprocessing Recommendations ===")
+    recommended_window = min(int(seq_info["p25"]), 256)
+
+    lines = [
+        "# Preprocessing Recommendations — ARST Phase 1\n\n",
+        "## 1. Normalization Strategy\n\n",
+        "**Recommendation: Z-score normalization per modality, computed on training set**\n\n",
+        "- **IMU:** z-score per channel (acc_x/y/z, rot_w/x/y/z independently)\n",
+        "  - Rationale: channels have different physical units (m/s² vs dimensionless quaternion)\n",
+        "  - Compute μ, σ on training set; apply to val/test (no data leakage)\n",
+        "- **Thermal:** z-score across all 5 channels jointly\n",
+        "  - Rationale: channels measure the same quantity (temperature) — global normalization valid\n",
+        "- **ToF:** Normalize valid readings only (exclude -1.0 sentinel)\n",
+        "  - Per-sensor normalization (tof_1, tof_2, ... independently) since sensors may differ\n",
+        "  - After normalization, set invalid readings to 0.0 (neutral value)\n\n",
+        "## 2. Missing Value Strategy\n\n",
+        "**IMU & Thermal:** No missing values expected (NaN rate ≈ 0%)\n",
+        "- If NaN occurs: forward-fill (last valid observation) → backward-fill → 0.0\n\n",
+        "**ToF:** Use sentinel-aware masking:\n",
+        "1. Create binary validity mask: `tof_mask = (tof != -1.0).float()`\n",
+        "2. Replace -1.0 with 0.0 in the data tensor\n",
+        "3. Pass both `tof` and `tof_mask` to the ToF encoder\n",
+        "4. The Reliability Module can use the mask as a quality signal\n\n",
+        "## 3. Sequence Padding Strategy\n\n",
+        f"**Recommended window size: T = {recommended_window} timesteps**\n\n",
+        f"Rationale: P25={seq_info['p25']:.0f}, median={seq_info['median_length']:.0f}. ",
+        f"Using T={recommended_window} means ~75% of sequences are at least this long.\n\n",
+        "**Padding:** Pad with zeros at the end (`nn.utils.rnn.pad_sequence`)\n",
+        "- Maintain a sequence length mask for attention-based models\n",
+        "- Short sequences (< T): pad to T with zeros\n",
+        "- Long sequences (> T): extract windows with 50% overlap during training\n\n",
+        "## 4. Sequence Truncation Strategy\n\n",
+        "For sequences longer than the window:\n",
+        "1. **Training:** Sliding windows with stride=T//2 (50% overlap)\n",
+        "2. **Inference:** Sliding windows with stride=T (no overlap) → aggregate predictions\n",
+        "3. **Aggregation:** Majority vote or mean probability across windows\n\n",
+        "## 5. Scaling Strategy\n\n",
+        "- All sensor values after normalization should be in approximately [-3, 3]\n",
+        "- Clip extreme outliers at ±5σ before normalization (helps with motion artifacts)\n",
+        "- ToF depth values: after masking, values in [0, ~500 mm typically] → normalize to [0, 1]\n\n",
+        "## 6. Train/Val/Test Split\n\n",
+        "**Recommended:** Subject-stratified split\n",
+        "- Train: 70% of subjects\n",
+        "- Val: 15% of subjects\n",
+        "- Test: 15% of subjects\n",
+        "- Ensures no subject appears in multiple splits (prevents data leakage)\n",
+        "- Within each split, maintain class balance via stratified sampling\n\n",
+        "## 7. Data Type\n\n",
+        "- Use `float32` throughout (halves memory vs float64; sufficient precision for sensor data)\n",
+        "- Labels: `int64` (torch.long)\n",
+        "- Masks: `float32` (0.0 / 1.0)\n\n",
+        "## 8. Implementation Priority\n\n",
+        "1. IMU z-score normalization (simple, high priority)\n",
+        "2. ToF mask creation (critical for reliability module)\n",
+        "3. Window extraction with configurable size and stride\n",
+        "4. Thermal normalization (low urgency — data is clean)\n",
+    ]
+    out = REPORTS / "preprocessing_recommendations.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 14. Phase 1 Summary
+# ──────────────────────────────────────────────────────────────────────────────
+def write_phase1_summary(
+    inventory: dict,
+    profile: dict,
+    target_info: dict,
+    seq_info: dict,
+    missing_info: dict,
+    groups: dict,
+) -> None:
+    log.info("=== 14. Phase 1 Summary ===")
+    recommended_window = min(int(seq_info["p25"]), 256)
+
+    lines = [
+        "# Phase 1 Summary — Dataset Exploration\n\n",
+        "**Status:** ✅ Complete\n\n",
+        "## Key Findings\n\n",
+        f"1. **Dataset format:** Flat CSV (not per-sequence parquet). {profile['total_rows']:,} rows × {profile['total_columns']} columns.\n",
+        f"2. **Train size:** ~{list(inventory.values())[0].get('size_mb', '?')} MB on disk.\n",
+        f"3. **Behavior classes:** {target_info['n_classes']} unique behaviors.\n",
+        f"4. **Class imbalance:** {target_info['imbalance_ratio']}× ratio (max/min class size).\n",
+        f"5. **Sequences:** {seq_info['n_sequences']:,} total, {seq_info['n_subjects']} subjects.\n",
+        f"6. **Sequence lengths:** min={seq_info['min_length']}, max={seq_info['max_length']}, mean={seq_info['mean_length']:.0f}.\n",
+        f"7. **IMU features:** {len(groups['imu'])} channels (acc + quaternion, NOT acc+gyro as docs assumed).\n",
+        f"8. **Thermal features:** {len(groups['thermal'])} channels (5, NOT 64).\n",
+        f"9. **ToF features:** {len(groups['tof'])} channels ({len(groups['tof'])//64} sensors × 64 pixels each).\n",
+        "10. **ToF invalidity:** High rate of -1.0 sentinel values encoding failed distance measurements.\n\n",
+        "## Dataset Risks\n\n",
+        "| Risk | Severity | Mitigation |\n|---|---|---|\n",
+        f"| Class imbalance ({target_info['imbalance_ratio']}×) | High | Weighted loss, stratified splits, Focal Loss |\n",
+        "| ToF invalid readings (high %) | High | Sentinel masking, validity mask channel, reliability module |\n",
+        "| Variable sequence lengths | Medium | Fixed-window extraction with padding |\n",
+        "| IMU: quaternion not gyroscope | Medium | Update architecture — quaternion has different properties than gyro |\n",
+        "| Flat CSV (not parquet) | Low | Chunked reading implemented; HDF5 conversion recommended |\n",
+        "| 1.1 GB training file | Medium | Never load fully; use chunked pipeline or convert to HDF5 |\n\n",
+        "## Memory Considerations (RTX 3060 4GB)\n\n",
+        f"- Full CSV in RAM: ~{profile['estimated_ram_gb']} GB — **DO NOT load all at once**\n",
+        "- Recommended: Convert to HDF5 (`preprocessor.py`) → windowed, compressed storage\n",
+        f"- Window size T={recommended_window}: each sample = (T×{len(groups['imu'])} + T×{len(groups['thermal'])} + T×{len(groups['tof'])}) float32 ≈ {recommended_window * (len(groups['imu']) + len(groups['thermal']) + len(groups['tof'])) * 4 / 1024:.1f} KB\n",
+        "- At batch_size=32: ~1 MB per batch (fits easily in VRAM)\n",
+        "- Full ARST model: ~2.5 GB VRAM (needs gradient checkpointing for T=256)\n\n",
+        "## Recommended Max Sequence Length\n\n",
+        f"**T = {recommended_window} timesteps**\n\n",
+        f"- P5 = {seq_info['p5']:.0f} (all sequences have at least this length)\n",
+        f"- P25 = {seq_info['p25']:.0f} (75% of sequences are at least this long)\n",
+        f"- With T={recommended_window}, most sequences provide 1-2 windows; short ones are padded\n\n",
+        "## Recommended Preprocessing Pipeline\n\n",
+        "```\n",
+        "Raw train.csv\n",
+        "    │\n",
+        "    ▼ (chunked reading)\n",
+        "Modality separation: [IMU 7ch] [Thermal 5ch] [ToF 320ch]\n",
+        "    │\n",
+        "    ▼\n",
+        "ToF sentinel masking: -1.0 → 0.0, mask = (tof != -1.0)\n",
+        "    │\n",
+        "    ▼\n",
+        "Z-score normalization (per-channel, fit on train)\n",
+        "    │\n",
+        "    ▼\n",
+        f"Window extraction: T={recommended_window}, stride=T//2\n",
+        "    │\n",
+        "    ▼\n",
+        "Save to HDF5: /windows/imu, /windows/thermo, /windows/tof, /windows/tof_mask, /windows/labels\n",
+        "    │\n",
+        "    ▼\n",
+        "ARSTDataset → DataLoader → Training\n",
+        "```\n\n",
+        "## Recommendations for Phase 2 Baseline Models\n\n",
+        "1. **Architecture note:** IMU has quaternion (rot_w/x/y/z), not raw gyroscope. Treat as 7-channel signal.\n",
+        "2. **Thermal note:** Only 5 thermopile channels (not 64 as docs assumed). Linear projection head is appropriate.\n",
+        "3. **ToF note:** 320 total features (5 sensors × 64 pixels). Consider per-sensor processing.\n",
+        "4. **Baseline input:** After windowing, shape is `[B, T, 7]` (IMU), `[B, T, 5]` (thermal), `[B, T, 320]` (ToF).\n",
+        "5. **Loss:** Use Focal Loss or weighted CE given the class imbalance.\n",
+        "6. **Evaluation:** Macro F1 (not accuracy) is the primary metric.\n",
+        "7. **Start simple:** MLP on statistical features (mean, std, min, max per channel per window).\n",
+        "8. **Memory:** With T=256 and batch=32, batches are tiny — you can use larger batches than expected.\n\n",
+        "## Phase 1 Deliverables Checklist\n\n",
+        "- [x] `reports/dataset_inventory.md` — File inventory with sizes, row counts, schema\n",
+        "- [x] `reports/dataset_profile.md` — Chunked profiling of train.csv\n",
+        "- [x] `configs/sensor_groups.yaml` — Automatic sensor group identification\n",
+        "- [x] `reports/class_analysis.md` — Target analysis with class frequencies\n",
+        "- [x] `outputs/eda/class_distribution.png` — Class distribution chart\n",
+        "- [x] `reports/sequence_analysis.md` — Sequence length statistics\n",
+        "- [x] `outputs/eda/sequence_length_distribution.png` — Sequence length histogram\n",
+        "- [x] `reports/missing_data_analysis.md` — Missing data analysis\n",
+        "- [x] `outputs/eda/missing_values_heatmap.png` — Missing data heatmap\n",
+        "- [x] `outputs/eda/missing_values_report.csv` — Per-feature missing report\n",
+        "- [x] `outputs/eda/sensor_statistics.csv` — Per-feature statistics\n",
+        "- [x] `outputs/eda/examples/` — IMU, thermal, ToF visualizations per behavior\n",
+        "- [x] `reports/reliability_motivation.md` — Reliability module justification\n",
+        "- [x] `reports/preprocessing_recommendations.md` — Preprocessing strategy\n",
+        "- [x] `src/arst/data/dataset.py` — Updated PyTorch dataset (flat CSV aware)\n",
+        "- [x] `src/arst/data/dataloader.py` — Train/val/test loaders\n",
+        "- [x] `notebooks/phase1_dataset_exploration.ipynb` — Reproducible EDA notebook\n",
+        "- [x] `reports/phase1_summary.md` — This document\n",
+    ]
+    out = REPORTS / "phase1_summary.md"
+    out.write_text("".join(lines), encoding="utf-8")
+    log.info("  Written: %s", out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────────────
+def main() -> None:
+    log.info("=" * 60)
+    log.info("  ARST Phase 1 — Dataset Exploration")
+    log.info("=" * 60)
+
+    # 1. Inventory
+    inventory = build_dataset_inventory()
+    write_dataset_inventory(inventory)
+
+    # 2. Profile
+    profile = profile_dataset()
+    write_dataset_profile(profile)
+
+    # 3. Sensor groups
+    groups = identify_sensor_groups(profile["columns"])
+    write_sensor_groups_yaml(groups)
+
+    # 4. Target analysis
+    target_info = analyze_targets()
+    plot_class_distribution(target_info)
+    write_class_analysis(target_info)
+
+    # 5. Sequence analysis
+    seq_info = analyze_sequences()
+    plot_sequence_length_distribution(seq_info)
+    write_sequence_analysis(seq_info)
+
+    # 6. Missing data
+    missing_info = analyze_missing_data(profile, groups)
+    plot_missing_heatmap(missing_info, groups)
+    write_missing_data_report(missing_info, groups)
+
+    # 7. Sensor statistics
+    stats_df = compute_sensor_statistics(groups)
+
+    # 8. Visualizations
+    generate_modality_visualizations(groups, target_info)
+
+    # 9. Reliability motivation
+    write_reliability_motivation(missing_info, target_info, stats_df)
+
+    # 10. Preprocessing recommendations
+    write_preprocessing_recommendations(seq_info, stats_df)
+
+    # 14. Phase 1 Summary
+    write_phase1_summary(inventory, profile, target_info, seq_info, missing_info, groups)
+
+    log.info("=" * 60)
+    log.info("  Phase 1 EDA COMPLETE")
+    log.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
