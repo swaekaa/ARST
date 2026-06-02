@@ -38,31 +38,71 @@
 
 [CMI — Detect Behavior with Sensor Data](https://www.kaggle.com/competitions/child-mind-institute-detect-sleep-states) (Kaggle)
 
-| Modality | Sensors | Sampling Rate |
-|---|---|---|
-| IMU | 3-axis Accelerometer + 3-axis Gyroscope | ~50 Hz |
-| Thermopile | 8×8 thermal array | ~10 Hz |
-| Time-of-Flight (ToF) | 8×8 proximity grid | ~10 Hz |
+> **Phase 1 verified schema** — values below are confirmed from `data/raw/train.csv` (574,945 rows).
+
+| Modality | Sensors | Channels | Notes |
+|---|---|---|---|
+| IMU | 3-axis Accelerometer + Quaternion | **7** (`acc_x/y/z`, `rot_w/x/y/z`) | Not gyroscope; quaternion orientation |
+| Thermopile | 5 infrared channels | **5** (`thm_1`…`thm_5`) | Linear array, not 8×8 grid |
+| Time-of-Flight (ToF) | 5 sensors × 64 pixels | **320** (`tof_1_v0`…`tof_5_v63`) | ~59% readings invalid (encoded as −1.0) |
+
+**Dataset statistics:**
+- **574,945** total timestep rows (flat CSV — _not_ per-sequence parquet)
+- **8,151** unique sequences across multiple subjects
+- **4** behavior classes (see below)
+- Overall missing rate: ~1.8% NaN + ~59% ToF sentinel invalidity
+
+**Behavior classes:**
+
+| Index | Class |
+|---|---|
+| 0 | Hand at target location |
+| 1 | Moves hand to target location |
+| 2 | Performs gesture |
+| 3 | Relaxes and moves hand to target location |
 
 ---
 
 ## Architecture
 
 ```
-IMU Sequence        ──► IMU Encoder        ──► IMU Embedding   ─┐
-Thermopile Sequence ──► Thermal Encoder    ──► Thermal Embedding─┼──► Reliability Scores
-ToF Sequence        ──► ToF Encoder        ──► ToF Embedding   ─┘         │
-                                                                            ▼
-                                                               Adaptive Fusion Transformer
-                                                                            │
-                                                                            ▼
-                                                                  Classification Head
-                                                                            │
-                                                                            ▼
-                                                                    Behavior Class
+IMU Sequence   [B,T,7]  ──► IMU Encoder   ──► IMU Embedding   [B,T,D] ─┐
+Thermal Seq.   [B,T,5]  ──► Therm Encoder ──► Therm Embedding [B,T,D] ─┼──► Reliability Scores
+ToF Sequence   [B,T,320]──► ToF Encoder   ──► ToF Embedding   [B,T,D] ─┘         │
+               + mask[B,T,320]                (mask used inside encoder)           ▼
+                                                                   Adaptive Fusion Transformer
+                                                                                   │
+                                                                                   ▼
+                                                                         Classification Head
+                                                                                   │
+                                                                                   ▼
+                                                                     Behavior Class (C=4)
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system diagram and mathematical formulation.
+
+---
+
+## Phase 1 Findings & Architectural Implications
+
+> Phase 1 EDA (see `reports/phase1_summary.md`) revealed several discrepancies between the initial architecture assumptions and the actual dataset schema.
+
+| Property | Initially Assumed | **Actual (Phase 1 Confirmed)** | Impact |
+|---|---|---|---|
+| Storage format | Per-sequence `.parquet` files | **Single flat CSV (1.1 GB)** | Chunked reading + HDF5 conversion required |
+| IMU channels | acc + gyroscope (6) | **acc + quaternion = 7** | IMU encoder input dim: 6 → **7** |
+| Thermopile | 8×8 grid = 64 channels | **5 linear channels** | Thermal encoder drastically simplified |
+| ToF | Single 8×8 map = 64 channels | **5 sensors × 64 = 320 channels** | ToF encoder input dim: 64 → **320** |
+| ToF invalidity | Unknown | **~59% avg (encoded as −1.0)** | Mask channel is mandatory; primary ARM motivation |
+| Behavior classes | Unknown | **4 classes** | Classification head output dim = 4 |
+| Total sequences | Unknown | **8,151** | Window strategy: T=128, 50% overlap |
+
+**Architectural changes required by Phase 1:**
+1. IMU encoder: `[B,T,6]` → `[B,T,7]` input projection
+2. Thermal encoder: `[B,T,64]` → `[B,T,5]` — simplified from spatial to linear
+3. ToF encoder: `[B,T,64]` → `[B,T,320]` + explicit mask channel `[B,T,320]`
+4. Classification head output: `C` → `4`
+5. Data pipeline: CSV-first, no parquet loading logic required
 
 ---
 
@@ -71,14 +111,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system diagram and mathemati
 ```
 ARST/
 ├── configs/             # Hydra YAML configs (model, data, training, sweep)
+│   └── sensor_groups.yaml   # Phase 1 verified sensor column assignments
 ├── data/                # Raw, processed, interim, and external data
 ├── deployment/          # ONNX export, serving, and Docker assets
 ├── docs/                # Research notes, diagrams, references
 ├── experiments/         # Per-run directories (W&B synced)
 ├── logs/                # Structured training and evaluation logs
 ├── notebooks/           # Ordered Jupyter notebooks (EDA → training)
-├── outputs/             # Model predictions, submission files
+│   └── phase1_dataset_exploration.ipynb  # Phase 1 EDA
+├── outputs/             # Model predictions, EDA figures, submission files
+│   └── eda/             # Phase 1 plots and CSVs
 ├── reports/             # Auto-generated figures, LaTeX tables, PDFs
+│   ├── dataset_inventory.md
+│   ├── dataset_profile.md
+│   ├── class_analysis.md
+│   ├── sequence_analysis.md
+│   ├── missing_data_analysis.md
+│   ├── reliability_motivation.md
+│   ├── preprocessing_recommendations.md
+│   └── phase1_summary.md
 ├── src/arst/            # Core Python package
 │   ├── data/            # Dataset classes, preprocessing, feature engineering
 │   ├── models/          # Encoders, reliability module, fusion, baselines
@@ -88,6 +139,8 @@ ARST/
 │   └── explainability/  # Saliency, reliability visualization, SHAP
 ├── tests/               # Unit and integration tests
 └── scripts/             # CLI entry points (train, eval, infer, sweep)
+    ├── phase1_eda.py    # Phase 1 EDA script (run to regenerate reports)
+    └── test_phase1.py   # Dataloader smoke test
 ```
 
 ---
@@ -116,13 +169,23 @@ pip install -e ".[dev]"
 python scripts/download_data.py --competition child-mind-institute-detect-sleep-states
 ```
 
-### 3. Preprocess Data
+### 3. Run Phase 1 EDA (already complete)
+
+```bash
+# Regenerate all Phase 1 reports and figures
+python scripts/phase1_eda.py
+
+# Verify dataloader batch shapes
+python scripts/test_phase1.py
+```
+
+### 4. Preprocess Data
 
 ```bash
 python scripts/preprocess.py --config configs/data/default.yaml
 ```
 
-### 4. Train a Baseline
+### 5. Train a Baseline
 
 ```bash
 python scripts/train.py \
@@ -131,7 +194,7 @@ python scripts/train.py \
     trainer.gpus=1
 ```
 
-### 5. Train ARST
+### 6. Train ARST
 
 ```bash
 python scripts/train.py \
@@ -141,7 +204,7 @@ python scripts/train.py \
     model.fusion.type=adaptive
 ```
 
-### 6. Run Ablation Suite
+### 7. Run Ablation Suite
 
 ```bash
 python scripts/run_ablation.py --config configs/ablation/full_suite.yaml
@@ -180,7 +243,7 @@ python scripts/run_ablation.py --config configs/ablation/full_suite.yaml
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Dataset Exploration & EDA | 🔲 |
+| 1 | Dataset Exploration & EDA | ✅ Complete |
 | 2 | Baseline Models | 🔲 |
 | 3 | Sensor-Specific Encoders | 🔲 |
 | 4 | Reliability Estimation Module | 🔲 |

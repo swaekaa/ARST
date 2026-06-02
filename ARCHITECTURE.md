@@ -1,7 +1,9 @@
-    # ARST — System Architecture
+# ARST — System Architecture
 
 > **Adaptive Reliability Sensor Transformer**
 > Full Architecture Reference Document
+>
+> _All dimensions reflect **Phase 1 verified** dataset schema._
 
 ---
 
@@ -24,160 +26,184 @@
 ```
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                         ARST SYSTEM ARCHITECTURE                        ║
+║                   (Phase 1 verified — June 2026)                        ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║                                                                          ║
 ║  ┌─────────────────────────────────────────────────────────────────┐    ║
 ║  │                        DATA LAYER                               │    ║
-║  │  Raw Parquet → Preprocessing → Windowing → DataLoader           │    ║
+║  │  Flat CSV (train.csv, 574,945 rows)                             │    ║
+║  │  → Chunked read → Sequence grouping → Windowing (T=128)         │    ║
+║  │  → HDF5 (data/processed/train_windows.h5)                       │    ║
 ║  └─────────────────────────┬───────────────────────────────────────┘    ║
 ║                            │                                            ║
 ║  ┌─────────────────────────▼───────────────────────────────────────┐    ║
 ║  │                     ENCODER LAYER                               │    ║
-║  │  IMU Encoder │ Thermal Encoder │ ToF Encoder                    │    ║
-║  │  [B,T,6]→[B,T,D] │ [B,T,64]→[B,T,D] │ [B,T,64]→[B,T,D]       │    ║
+║  │                                                                 │    ║
+║  │  IMU Encoder      Thermal Encoder      ToF Encoder              │    ║
+║  │  [B,T,7]→[B,T,D]  [B,T,5]→[B,T,D]    [B,T,320]+mask→[B,T,D]  │    ║
+║  │                                                                 │    ║
 ║  └─────────────────────────┬───────────────────────────────────────┘    ║
 ║                            │                                            ║
 ║  ┌─────────────────────────▼───────────────────────────────────────┐    ║
 ║  │                   RELIABILITY LAYER                             │    ║
 ║  │  ARM_imu | ARM_thm | ARM_tof                                    │    ║
 ║  │  [B,T,D]→[B,T,1] per modality                                  │    ║
+║  │                                                                 │    ║
+║  │  Expected priors (from Phase 1):                                │    ║
+║  │    r_imu ≈ high   (~0.4% invalid)                               │    ║
+║  │    r_thm ≈ mostly high  (~2.1% invalid)                         │    ║
+║  │    r_tof ≈ highly variable  (~59% invalid on average)           │    ║
 ║  └─────────────────────────┬───────────────────────────────────────┘    ║
 ║                            │                                            ║
 ║  ┌─────────────────────────▼───────────────────────────────────────┐    ║
 ║  │                   ADAPTIVE FUSION LAYER                         │    ║
 ║  │  Reliability-Biased Cross-Modal Transformer                     │    ║
-║  │  [B,3T,D] + bias → [B,D]                                       │    ║
+║  │  [B,3T,D] + reliability bias → [B,D]                           │    ║
 ║  └─────────────────────────┬───────────────────────────────────────┘    ║
 ║                            │                                            ║
 ║  ┌─────────────────────────▼───────────────────────────────────────┐    ║
 ║  │                  CLASSIFICATION LAYER                           │    ║
-║  │  MLP Head → Softmax → [B,C]                                     │    ║
+║  │  MLP Head → Softmax → [B, 4]   (4 behavior classes)            │    ║
 ║  └─────────────────────────────────────────────────────────────────┘    ║
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-### 1.2 Module Inventory
+### 1.2 Module Inventory (Phase 1 Updated)
 
-| Module | Class | File | Parameters (est.) |
-|---|---|---|---|
-| IMU Encoder | `IMUEncoder` | `models/encoders/imu_encoder.py` | ~2M |
-| Thermal Encoder | `ThermalEncoder` | `models/encoders/thermal_encoder.py` | ~2M |
-| ToF Encoder | `ToFEncoder` | `models/encoders/tof_encoder.py` | ~2M |
-| Reliability Head (×3) | `ReliabilityHead` | `models/reliability/arm.py` | ~50K each |
-| Adaptive Fusion Transformer | `AdaptiveFusionTransformer` | `models/fusion/aft.py` | ~5M |
-| Classification Head | `ClassificationHead` | `models/heads/classification.py` | ~100K |
-| **Total (ARST-Full)** | `ARSTModel` | `models/arst.py` | **~11M** |
+| Module | Class | File | Input Dim | Parameters (est.) |
+|---|---|---|---|---|
+| IMU Encoder | `IMUEncoder` | `models/encoders/imu_encoder.py` | `[B,T,7]` | ~2M |
+| Thermal Encoder | `ThermalEncoder` | `models/encoders/thermal_encoder.py` | `[B,T,5]` | ~1M |
+| ToF Encoder | `ToFEncoder` | `models/encoders/tof_encoder.py` | `[B,T,320]+mask` | ~3M |
+| Reliability Head (×3) | `ReliabilityHead` | `models/reliability/arm.py` | `[B,T,D]` | ~50K each |
+| Adaptive Fusion Transformer | `AdaptiveFusionTransformer` | `models/fusion/aft.py` | `[B,3T,D]+bias` | ~5M |
+| Classification Head | `ClassificationHead` | `models/heads/classification.py` | `[B,D]` → `[B,4]` | ~100K |
+| **Total (ARST-Full)** | `ARSTModel` | `models/arst.py` | — | **~11M** |
 
 ---
 
 ## 2. Data Flow
 
-### 2.1 Offline Preprocessing Pipeline
+### 2.1 Offline Preprocessing Pipeline (Phase 1 Updated)
 
 ```
-Raw Data (Parquet files)
-        │
-        ▼
-┌─────────────────────────┐
-│  SensorDataLoader       │
-│  - Load parquet files   │
-│  - Align timestamps     │
-│  - Handle missing files │
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  PerModalityPreprocessor│
-│  IMU:                   │
-│    - Bandpass filter     │
-│    - Gravity removal     │
-│    - Normalization       │
-│  Thermal:               │
-│    - Dead pixel fix      │
-│    - Background sub.     │
-│    - Normalization       │
-│  ToF:                   │
-│    - Invalid mask        │
-│    - Inpainting          │
-│    - Normalization       │
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  FeatureEngineer        │
-│  (optional)             │
-│  - ENMO, jerk, STFT     │
-│  - Thermal centroid      │
-│  - ToF gradients         │
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  WindowSlicer           │
-│  - Fixed window: T=256  │
-│  - Stride: 50% overlap  │
-│  - Pad short sequences  │
-│  - Label assignment     │
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  Save to HDF5 / NPZ     │
-│  data/processed/        │
-└─────────────────────────┘
+Raw Data: data/raw/train.csv
+  (574,945 rows × 341 columns — single flat file, NO per-sequence parquet)
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  ChunkedCSVReader                       │
+│  - Read CSV in chunks of 50,000 rows    │
+│  - Group rows by sequence_id            │
+│  - Sort by sequence_counter             │
+└──────────────────────┬──────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────┐
+│  PerModalityPreprocessor                │
+│                                         │
+│  IMU [T, 7]:                            │
+│    - Z-score per channel                │
+│    - No filtering needed (quaternion)   │
+│                                         │
+│  Thermal [T, 5]:                        │
+│    - Linear interpolation for NaN       │
+│    - Z-score per channel                │
+│                                         │
+│  ToF [T, 320]:                          │
+│    - Extract mask: M=(X != -1.0)        │
+│    - Zero-fill invalid: X[M==0] = 0     │
+│    - Z-score on valid readings only     │
+│    - Return (X_clean, M) together       │
+└──────────────────────┬──────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────┐
+│  WindowSlicer                           │
+│  - Fixed window: T=128 timesteps        │
+│  - Stride: 64 timesteps (50% overlap)   │
+│  - Pad short sequences with zeros       │
+│  - Label assignment (majority vote)     │
+└──────────────────────┬──────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────┐
+│  Save to HDF5: data/processed/          │
+│  train_windows.h5                       │
+│  Structure:                             │
+│    /windows/imu      [N, 128, 7]        │
+│    /windows/thermo   [N, 128, 5]        │
+│    /windows/tof      [N, 128, 320]      │
+│    /windows/tof_mask [N, 128, 320]      │
+│    /windows/labels   [N]                │
+│    /splits/train/indices                │
+│    /splits/val/indices                  │
+│    /splits/test/indices                 │
+│    /metadata/class_names                │
+└─────────────────────────────────────────┘
 ```
 
 ### 2.2 Online Data Flow (Training)
 
 ```
-HDF5 Dataset
+HDF5 Dataset (data/processed/train_windows.h5)
      │
      ▼
-ARSTDataset (torch.utils.data.Dataset)
+ARSTDataset (src/arst/data/dataset.py)
      │
      ├── __getitem__(idx)
-     │     ├── Load window: X_imu [T,6], X_thm [T,64], X_tof [T,64]
-     │     ├── Apply online augmentation (if training)
+     │     ├── Load window:
+     │     │     X_imu    [128, 7]    float32  — acc + quaternion
+     │     │     X_thm    [128, 5]    float32  — 5 thermopile channels
+     │     │     X_tof    [128, 320]  float32  — 5 sensors × 64 pixels (invalid → 0)
+     │     │     M_tof    [128, 320]  float32  — validity mask (1=valid, 0=invalid)
+     │     │     label    scalar      int64    — 0–3
+     │     ├── Apply online augmentation (if training):
      │     │     ├── RandomTimeWarp
      │     │     ├── RandomChannelNoise
      │     │     └── RandomModalityDrop (for MM robustness training)
-     │     └── Return (X_imu, X_thm, X_tof, label, metadata)
+     │     └── Return dict of tensors
      │
      ▼
 DataLoader (batch_size=32, num_workers=4, pin_memory=True)
      │
      ▼
-     [B,T,6]    [B,T,64]   [B,T,64]
-     X_imu      X_thm      X_tof
+Batch tensors:
+  X_imu:   [B, 128, 7]     float32
+  X_thm:   [B, 128, 5]     float32
+  X_tof:   [B, 128, 320]   float32
+  M_tof:   [B, 128, 320]   float32
+  labels:  [B]              int64
 ```
 
-### 2.3 Model Forward Pass Data Flow
+### 2.3 Model Forward Pass Data Flow (Phase 1 Updated)
 
 ```
-X_imu [B,T,6] ──► IMUEncoder ──────────────► H_imu [B,T,D] ──► ARM_imu ──► r_imu [B,T,1]
-                                                │                                │
-X_thm [B,T,64] ─► ThermalEncoder ─────────────► H_thm [B,T,D] ──► ARM_thm ──► r_thm [B,T,1]
-                                                │                                │
-X_tof [B,T,64] ─► ToFEncoder ─────────────────► H_tof [B,T,D] ──► ARM_tof ──► r_tof [B,T,1]
-                                                │                                │
-                                                ▼                                ▼
-                                    Gate: Ĥ_m = r_m ⊙ H_m
-                                                │
-                                                ▼
-                                  Concat: [Ĥ_imu; Ĥ_thm; Ĥ_tof] [B,3T,D]
-                                                │
-                                                ▼  ← reliability bias matrix
-                                  AdaptiveFusionTransformer
-                                                │
-                                                ▼
-                                    H_fused [B,D]  (CLS token or mean pool)
-                                                │
-                                                ▼
-                                   ClassificationHead
-                                                │
-                                                ▼
-                                        logits [B,C]
+X_imu  [B,T,7]   ──────────► IMUEncoder ──────────────► H_imu [B,T,D] ──► ARM_imu ──► r_imu [B,T,1]
+                                                           │                                │
+X_thm  [B,T,5]   ──────────► ThermalEncoder ─────────────► H_thm [B,T,D] ──► ARM_thm ──► r_thm [B,T,1]
+                                                           │                                │
+X_tof  [B,T,320] ──┐                                      │                                │
+M_tof  [B,T,320] ──┴─► ToFEncoder (masked) ──────────────► H_tof [B,T,D] ──► ARM_tof ──► r_tof [B,T,1]
+                                                           │                                │
+                                                           ▼                                ▼
+                                               Gate: Ĥ_m = r_m ⊙ H_m
+                                                           │
+                                                           ▼
+                                         Concat: [Ĥ_imu; Ĥ_thm; Ĥ_tof] [B,3T,D]
+                                                           │
+                                                           ▼  ← reliability bias matrix
+                                           AdaptiveFusionTransformer
+                                                           │
+                                                           ▼
+                                               H_fused [B,D]  (CLS token or mean pool)
+                                                           │
+                                                           ▼
+                                              ClassificationHead
+                                                           │
+                                                           ▼
+                                                   logits [B, 4]
 ```
 
 ---
@@ -209,7 +235,7 @@ Trainer
 │       │
 │       └── validate_epoch()
 │           ├── Forward pass (no grad)
-│           ├── Compute metrics (F1, AUROC, ECE)
+│           ├── Compute metrics (Macro F1, AUROC, ECE)
 │           ├── Save best checkpoint
 │           └── Log validation metrics to W&B
 │
@@ -224,7 +250,7 @@ Trainer
 ```python
 # Pseudocode
 def compute_loss(logits, labels, reliability_scores, config):
-    # Primary classification loss
+    # Primary classification loss — Focal recommended (class imbalance confirmed)
     if config.loss.type == "focal":
         L_cls = focal_loss(logits, labels, gamma=2.0, alpha=class_weights)
     else:
@@ -269,7 +295,7 @@ training:
   epochs: 100
   batch_size: 32
   accumulation_steps: 4        # Effective batch = 128
-  mixed_precision: true        # AMP for RTX 3060
+  mixed_precision: true        # AMP for RTX 3060 (4 GB VRAM)
   compile: false               # torch.compile (optional)
 
   early_stopping:
@@ -290,13 +316,15 @@ training:
 ### 4.1 Standard Inference
 
 ```
-Input: Raw sensor files (parquet)
+Input: Raw data/raw/test.csv
         │
         ▼
 PreprocessingPipeline (identical to training, no augmentation)
+  - Z-score IMU [T,7], Thermal [T,5]
+  - Zero-fill ToF [T,320] + extract mask [T,320]
         │
         ▼
-Window generation (stride = window_size → no overlap at inference)
+Window generation (T=128, stride=128 → no overlap at inference)
         │
         ▼
 ARSTInferenceEngine
@@ -304,8 +332,8 @@ ARSTInferenceEngine
     ├── model.eval()
     ├── torch.no_grad()
     └── For each window:
-        ├── Forward pass → logits, reliability_scores
-        ├── Softmax → probabilities
+        ├── Forward pass → logits [B,4], reliability_scores [B,T,1]×3
+        ├── Softmax → probabilities [B,4]
         └── Store: (window_idx, probs, reliability_scores)
         │
         ▼
@@ -338,7 +366,7 @@ K trained ARST models (different seeds or architectures)
         │
         ▼
 For each model k:
-    └── Forward pass → probs_k [B, C]
+    └── Forward pass → probs_k [B, 4]
         │
         ▼
 Ensemble aggregation:
@@ -364,8 +392,8 @@ Deployment Assets:
     deployment/
     ├── arst_model.onnx
     ├── arst_model_int8.onnx
-    ├── preprocessor_config.json
-    └── label_encoder.json
+    ├── preprocessor_config.json   # includes ToF mask pipeline
+    └── label_encoder.json         # 4-class mapping
 ```
 
 ---
@@ -406,7 +434,17 @@ r_m ∈ ℝ^{B×T×1}     (reliability score: 0=unreliable, 1=reliable)
 | Gradient flow | Direct (no stop-gradient) | Allow reliability to influence encoder training |
 | Initialization | Bias = 0 → σ(0) = 0.5 | Start with equal reliability; learn from data |
 
-### 5.3 Reliability Score Monitoring
+### 5.3 Phase 1 Motivation for ARM per Modality
+
+| Modality | Missing % | Expected r_m Behaviour |
+|---|---|---|
+| IMU | ~0.4% | r_imu ≈ high throughout; ARM learns subtle motion artifact patterns |
+| Thermopile | ~2.1% | r_thm mostly high; drops on missing timesteps |
+| **ToF** | **~59.4% invalid (−1.0)** | **r_tof highly variable; should track M_tof validity** |
+
+The ToF validity mask `M_tof` provides a direct training signal: at timesteps where `mean(M_tof[b,t,:]) ≈ 0` (almost all 320 pixels invalid), we expect `r_tof[b,t]` to approach 0. The ARM can learn this correlation from the classification loss alone, or optionally via a mask-alignment auxiliary loss.
+
+### 5.4 Reliability Score Monitoring
 
 During training, log the following to W&B:
 
@@ -422,6 +460,9 @@ wandb.log({
     "reliability/imu_hist": wandb.Histogram(r_imu.cpu().numpy()),
     "reliability/thm_hist": wandb.Histogram(r_thm.cpu().numpy()),
     "reliability/tof_hist": wandb.Histogram(r_tof.cpu().numpy()),
+    # ToF-specific: compare reliability to mask validity
+    "reliability/tof_mask_mean": M_tof.mean().item(),   # ~0.41 expected
+    "reliability/tof_r_vs_mask_corr": corr(r_tof, M_tof.mean(dim=-1)),
 })
 ```
 
@@ -429,8 +470,9 @@ wandb.log({
 - Reliability collapse: all scores → 0 or 1 (indicates loss weight imbalance)
 - Modality dominance: one modality always scores r≈1 (may indicate data imbalance)
 - Temporal patterns: reliability should vary across timesteps within a window
+- **ToF-specific:** r_tof should negatively correlate with ToF invalidity fraction at each timestep
 
-### 5.4 Reliability Probe (Validation)
+### 5.5 Reliability Probe (Validation)
 
 To validate reliability is meaningful, run post-hoc analysis:
 
@@ -442,6 +484,10 @@ To validate reliability is meaningful, run post-hoc analysis:
 # 4. Check: corrupted modality should have lower reliability
 
 delta_r_imu = r_imu_corrupted - r_imu_clean  # Should be negative
+
+# Additional ToF-specific probe:
+# 5. Zero out M_tof (force all ToF to "invalid")
+# 6. Check: r_tof should decrease toward 0
 ```
 
 ---
@@ -452,9 +498,9 @@ delta_r_imu = r_imu_corrupted - r_imu_clean  # Should be negative
 
 ```
 Inputs:
-    Ĥ_imu ∈ ℝ^{B×T×D}   (reliability-gated IMU embedding)
-    Ĥ_thm ∈ ℝ^{B×T×D}   (reliability-gated thermal embedding)
-    Ĥ_tof ∈ ℝ^{B×T×D}   (reliability-gated ToF embedding)
+    Ĥ_imu ∈ ℝ^{B×T×D}   (reliability-gated IMU embedding;    T=128, D=256)
+    Ĥ_thm ∈ ℝ^{B×T×D}   (reliability-gated thermal embedding; T=128, D=256)
+    Ĥ_tof ∈ ℝ^{B×T×D}   (reliability-gated ToF embedding;    T=128, D=256)
     r_imu, r_thm, r_tof ∈ ℝ^{B×T×1}   (reliability scores)
 
 Step 1: Prepend [MODAL] tokens
@@ -477,7 +523,7 @@ Step 5: Extract fused representation
     H_fused = H_cat[:, 0, :]   # CLS token (or mean pool)
 
 Output:
-    H_fused ∈ ℝ^{B×D}
+    H_fused ∈ ℝ^{B×D}   → ClassificationHead → logits ∈ ℝ^{B×4}
 ```
 
 ### 6.2 AFT Hyperparameters
@@ -493,6 +539,8 @@ fusion_transformer:
   use_reliability_bias: true
   use_modal_tokens: true
   pool_type: cls              # 'cls' or 'mean'
+  sequence_length: 128        # T (Phase 1 recommended window size)
+  n_classes: 4                # Phase 1 confirmed
 ```
 
 ### 6.3 Fusion Variants (Ablation)
@@ -514,15 +562,18 @@ fusion_transformer:
 ```
 For a given sequence:
     ├── Run forward pass → r_imu [T], r_thm [T], r_tof [T]
+    │                   → M_tof_mean [T]  (mean validity per timestep)
     └── Plot: temporal reliability heatmap per modality
         │
         ▼
     ┌──────────────────────────────────────────────────────┐
-    │  t:   0    50   100  150  200  250                   │
-    │ IMU: ████ ████ ░░░░ ███ ████ ████  (high→low→high)  │
-    │ THM: ████ ████ ████ ████ ███ ██░░  (gradual decay)  │
-    │ ToF: ░░░░ ░░░░ ████ ████ ████ ████  (late onset)    │
+    │  t:     0    32   64   96   128                      │
+    │  IMU:  ████ ████ ░░░░ ████ ████  (high→drop→high)   │
+    │  THM:  ████ ████ ████ ████ ███░  (gradual decay)     │
+    │  ToF:  ░░░░ ░░░░ ████ ████ ████  (late onset valid)  │
+    │  Mask: ░░░░ ░░░░ ████ ████ ████  (ToF validity)      │
     └──────────────────────────────────────────────────────┘
+    Expected: r_tof and M_tof_mean should track each other.
 ```
 
 ### 7.2 Saliency Maps
@@ -530,7 +581,8 @@ For a given sequence:
 **Gradient-based saliency (per modality):**
 
 ```python
-saliency = autograd.grad(logits[:, target_class].sum(), X_imu)[0]
+saliency_imu = autograd.grad(logits[:, target_class].sum(), X_imu)[0]
+# Shape: [B, T, 7] — importance per timestep per IMU channel
 # Visualize: |saliency| per timestep and channel
 ```
 
@@ -551,6 +603,7 @@ Extract attention weights from AFT layers:
 A_lh ∈ ℝ^{B×3T×3T}   # Full cross-modal attention matrix
 # Block structure reveals which modality attends to which
 # Block (imu→thm): A_lh[0:T, T:2T]
+# Block (imu→tof): A_lh[0:T, 2T:3T]  ← expected low when r_tof is low
 ```
 
 ### 7.4 SHAP-based Modality Attribution
@@ -560,6 +613,9 @@ import shap
 explainer = shap.DeepExplainer(model, background_data)
 shap_values = explainer.shap_values(test_inputs)
 # shap_values[class_idx][modality_idx] → [B, T, feature_dim]
+# IMU:   [B, T, 7]
+# Therm: [B, T, 5]
+# ToF:   [B, T, 320]
 # Aggregate: mean |SHAP| per modality → global modality importance
 ```
 
@@ -575,6 +631,11 @@ shap_values = explainer.shap_values(test_inputs)
 # 2. Calibration: mean(R_m | correct) vs mean(R_m | incorrect)
 # 3. Reliability histograms per class
 # 4. Per-modality reliability distribution per behavior class
+
+# ToF-specific analysis:
+# 5. Plot r_tof vs M_tof_mean (should correlate)
+# 6. Show prediction accuracy as a function of ToF validity rate
+#    — hypothesis: accuracy should decrease as M_tof_mean decreases
 ```
 
 ### 7.6 Class Activation Mapping (CAM) for Temporal Data
@@ -594,8 +655,13 @@ Adapted GradCAM for 1D temporal sequences:
 ```
 reports/explainability/
 ├── reliability_maps/
-│   ├── per_class/          # Avg reliability per class per modality
+│   ├── per_class/          # Avg reliability per class per modality (4 classes)
+│   │   ├── class_0_hand_at_target.png
+│   │   ├── class_1_moves_hand.png
+│   │   ├── class_2_performs_gesture.png
+│   │   └── class_3_relaxes.png
 │   └── per_sample/         # Individual sample reliability timelines
+├── tof_mask_correlation/   # r_tof vs M_tof validity fraction plots
 ├── saliency/
 │   ├── gradient_saliency/
 │   └── integrated_gradients/
