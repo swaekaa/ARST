@@ -276,84 +276,67 @@ class ARSTDataset(Dataset):
 # ──────────────────────────────────────────────────────────────────────────────
 class ARSTRawCSVDataset(Dataset):
     """
-    Dataset that reads directly from the raw train.csv (Phase 1/2 only).
+    Dataset that serves real windowed sequences for Phase 2 training.
 
-    This is a lightweight alternative for early experiments before the full
-    preprocessing pipeline (HDF5 conversion) is complete. It reads a
-    pre-loaded pandas DataFrame that was grouped by sequence_id.
-
-    .. warning::
-        This dataset requires the full DataFrame to be loaded into memory
-        per sequence. Use only for Phase 1/2 debugging and EDA. Switch to
-        :class:`ARSTDataset` (HDF5) for actual training.
+    Stores pre-extracted numpy arrays of shape [N, T, F] for each modality,
+    so every sample returns a genuine T-step time-series rather than a
+    tiled single-row mean.
 
     Args:
-        windows_df: DataFrame of pre-extracted windows. Expected columns:
-            all IMU, thermal, ToF features + ``"label"`` (int) and
-            ``"sequence_id"`` (str). Shape: (N_windows, n_features+2).
-        window_size: Fixed window length T.
-        label_col: Column name for the integer class label.
+        imu:       [N, T, 7]    float32
+        thermo:    [N, T, 5]    float32
+        tof:       [N, T, 320]  float32 (invalids replaced with 0.0)
+        tof_mask:  [N, T, 320]  float32 (1=valid, 0=invalid)
+        labels:    [N]          int64
+        n_classes: Total number of classes in the full dataset (fixed, global).
+        window_size: T — stored for compatibility checks.
         transform: Optional augmentation callable.
     """
 
     def __init__(
         self,
-        windows_df: pd.DataFrame,
+        imu: np.ndarray,
+        thermo: np.ndarray,
+        tof: np.ndarray,
+        tof_mask: np.ndarray,
+        labels: np.ndarray,
+        n_classes: int,
         window_size: int,
-        label_col: str = "label",
         transform: Callable | None = None,
     ) -> None:
-        self.df = windows_df.reset_index(drop=True)
+        self.imu = imu.astype(np.float32)
+        self.thermo = thermo.astype(np.float32)
+        self.tof = tof.astype(np.float32)
+        self.tof_mask = tof_mask.astype(np.float32)
+        self.labels: np.ndarray = labels.astype(np.int64)
+        self._n_classes = n_classes
         self.window_size = window_size
-        self.label_col = label_col
         self.transform = transform
+        self.n_samples: int = len(labels)
 
-        self.labels: np.ndarray = self.df[label_col].values.astype(np.int64)
-        self.n_samples: int = len(self.df)
-
-        # Validate columns exist
-        missing = [c for c in IMU_COLS + THERMAL_COLS + TOF_COLS if c not in self.df.columns]
-        if missing:
-            logger.warning(
-                "%d sensor columns missing from DataFrame: %s...",
-                len(missing),
-                missing[:5],
-            )
         logger.info(
             "ARSTRawCSVDataset: %d windows, T=%d, n_classes=%d",
             self.n_samples,
             self.window_size,
-            self.num_classes,
+            self._n_classes,
         )
 
     def __len__(self) -> int:
         return self.n_samples
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        """
-        Return one windowed sample.
-
-        Note: For a CSV-backed dataset, each 'sample' is already a single
-        window (a group of T consecutive rows). This is handled upstream
-        by window extraction logic.
-        """
-        row = self.df.iloc[idx]
-
-        # Extract each modality — shape [T, F]
-        imu = self._extract_cols(row, IMU_COLS, fill=0.0)  # [T, 7]
-        thermo = self._extract_cols(row, THERMAL_COLS, fill=0.0)  # [T, 5]
-        tof_raw = self._extract_cols(row, TOF_COLS, fill=0.0)  # [T, 320]
-
-        # Build ToF mask (1=valid, 0=invalid sentinel)
-        tof_mask = (tof_raw != TOF_INVALID_SENTINEL).astype(np.float32)
-        tof_clean = np.where(tof_raw == TOF_INVALID_SENTINEL, 0.0, tof_raw)
+        imu = self.imu[idx]  # [T, 7]
+        thermo = self.thermo[idx]  # [T, 5]
+        tof = self.tof[idx]  # [T, 320]
+        tof_mask = self.tof_mask[idx]  # [T, 320]
+        label = int(self.labels[idx])
 
         sample: dict = {
-            "imu": imu.astype(np.float32),
-            "thermo": thermo.astype(np.float32),
-            "tof": tof_clean.astype(np.float32),
+            "imu": imu,
+            "thermo": thermo,
+            "tof": tof,
             "tof_mask": tof_mask,
-            "label": int(self.labels[idx]),
+            "label": label,
         }
 
         if self.transform is not None:
@@ -368,44 +351,22 @@ class ARSTRawCSVDataset(Dataset):
             "index": torch.tensor(idx, dtype=torch.long),
         }
 
-    def _extract_cols(
-        self,
-        row: pd.Series,
-        cols: list[str],
-        fill: float = 0.0,
-    ) -> np.ndarray:
-        """
-        Extract sensor columns from a flat DataFrame row.
-
-        Since a 'window' in Phase 1 CSV mode is a single aggregated row
-        (not T actual rows), this returns a placeholder array of shape
-        ``[window_size, len(cols)]`` filled from available data.
-
-        For actual sequence data, see :meth:`ARSTSequenceDataset`.
-        """
-        avail = [c for c in cols if c in row.index]
-        if not avail:
-            return np.full((self.window_size, len(cols)), fill, dtype=np.float32)
-        vals = row[avail].values.astype(np.float32)
-        # Tile to window size (for flat-row CSV mode)
-        arr = np.tile(vals, (self.window_size, 1))
-        # Pad or truncate columns to expected width
-        target_w = len(cols)
-        if arr.shape[1] < target_w:
-            arr = np.pad(arr, ((0, 0), (0, target_w - arr.shape[1])))
-        elif arr.shape[1] > target_w:
-            arr = arr[:, :target_w]
-        return arr
-
     @property
     def num_classes(self) -> int:
-        return int(self.labels.max()) + 1
+        """Fixed global class count (not derived from observed labels)."""
+        return self._n_classes
 
     @property
     def class_weights(self) -> torch.Tensor:
-        counts = np.bincount(self.labels, minlength=self.num_classes).astype(np.float32)
-        weights = 1.0 / (counts + 1e-6)
-        weights = weights / weights.sum() * self.num_classes
+        """Inverse-frequency weights using the GLOBAL n_classes so the tensor
+        always has shape [n_classes] regardless of which classes appear in
+        this split."""
+        counts = np.bincount(self.labels, minlength=self._n_classes).astype(np.float32)
+        # For classes absent from this split, assign weight 0 (ignored by loss)
+        weights = np.where(counts > 0, 1.0 / counts, 0.0)
+        total = weights.sum()
+        if total > 0:
+            weights = weights / total * self._n_classes
         return torch.from_numpy(weights)
 
 

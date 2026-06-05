@@ -30,7 +30,7 @@ class MajorityBaseline(nn.Module):
             or pass directly at construction time.
     """
 
-    def __init__(self, num_classes: int = 4, majority_class: int = 0) -> None:
+    def __init__(self, num_classes: int = 4, majority_class: int = 0, **kwargs) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.majority_class = majority_class
@@ -94,6 +94,7 @@ class RandomBaseline(nn.Module):
         self,
         num_classes: int = 4,
         class_probs: list[float] | np.ndarray | None = None,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes

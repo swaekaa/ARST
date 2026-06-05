@@ -152,6 +152,30 @@ def main(cfg: DictConfig) -> None:
         if wb_logger.enabled:
             wb_logger.watch(model, log_freq=100)
 
+        # ── Batch Inspection Utility ──────────────────────────────────────
+        logger.info("Running batch inspection utility on first train batch...")
+        model.eval()
+        try:
+            inspect_batch = next(iter(train_loader))
+            b_imu = inspect_batch["imu"].to(ctx.device)
+            b_thm = inspect_batch["thermo"].to(ctx.device)
+            b_tof = inspect_batch["tof"].to(ctx.device)
+            b_mask = inspect_batch.get("tof_mask")
+            if b_mask is not None:
+                b_mask = b_mask.to(ctx.device)
+            b_labels = inspect_batch["label"].to(ctx.device)
+
+            with torch.no_grad():
+                b_logits = model(imu=b_imu, thermo=b_thm, tof=b_tof, tof_mask=b_mask)
+            b_preds = b_logits.argmax(dim=-1)
+
+            logger.info("Batch Sample Labels: %s", b_labels[:8].tolist())
+            logger.info("Batch Sample Preds : %s", b_preds[:8].tolist())
+            logger.info("Batch Sample Logits (first 2): \n%s", b_logits[:2].cpu().numpy())
+        except Exception as e:
+            logger.warning("Batch inspection failed: %s", e)
+        model.train()
+
         # ── Handle non-trainable baselines ────────────────────────────────
         if model_name in ("majority", "random"):
             _run_non_trainable_baseline(

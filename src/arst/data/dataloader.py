@@ -22,7 +22,14 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from arst.data.dataset import IMU_COLS, THERMAL_COLS, TOF_COLS, ARSTDataset, ARSTRawCSVDataset
+from arst.data.dataset import (
+    IMU_COLS,
+    THERMAL_COLS,
+    TOF_COLS,
+    TOF_INVALID_SENTINEL,
+    ARSTDataset,
+    ARSTRawCSVDataset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -266,47 +273,137 @@ def build_csv_loaders(
     val_subjects = set(subjects[n_test : n_test + n_val])
     train_subjects = set(subjects[n_test + n_val :])
 
-    def make_window_df(subjects_set: set[str]) -> pd.DataFrame:
-        """Extract one-row-per-window DataFrame for the given subjects."""
-        sub_df = df[df["subject"].isin(subjects_set)].copy()
-        windows = []
-        for seq_id, seq_data in sub_df.groupby("sequence_id"):
+    n_classes = len(behavior_encoder)  # global, fixed regardless of split content
+    imu_cols_avail = [c for c in IMU_COLS if c in df.columns]
+    thm_cols_avail = [c for c in THERMAL_COLS if c in df.columns]
+    tof_cols_avail = [c for c in TOF_COLS if c in df.columns]
+
+    def extract_split_arrays(
+        subjects_set: set,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        For each sequence in the split, extract a [T, F] array of real sensor
+        readings. Returns five stacked arrays: imu, thermo, tof, tof_mask, labels.
+
+        - Sequences shorter than window_size are zero-padded on the right.
+        - Sequences longer than window_size are truncated to the first T rows.
+        - NaN values are filled with 0.0 before returning.
+        """
+        sub_df = df[df["subject"].isin(subjects_set)]
+        all_imu, all_thm, all_tof, all_mask, all_labels = [], [], [], [], []
+
+        for _seq_id, seq_data in sub_df.groupby("sequence_id"):
             seq_data = seq_data.sort_values("sequence_counter")
             label = int(seq_data["label"].mode()[0])
-            # Aggregate: use up to window_size rows, compute column mean ignoring NaN.
-            # Using values[0] was the NaN root cause: 6.8% of sequences have NaN
-            # in their first row, which propagates directly into training tensors.
-            window_data = seq_data.iloc[:window_size]
-            row: dict = {"sequence_id": seq_id, "label": label}
-            for col in IMU_COLS + THERMAL_COLS + TOF_COLS:
-                if col in window_data.columns:
-                    col_vals = window_data[col].values
-                    if len(col_vals) == 0 or np.all(np.isnan(col_vals)):
-                        row[col] = 0.0
-                    else:
-                        mean_val = float(np.nanmean(col_vals))
-                        row[col] = mean_val if np.isfinite(mean_val) else 0.0
-                else:
-                    row[col] = 0.0
-            windows.append(row)
-        return pd.DataFrame(windows)
 
-    train_df = make_window_df(train_subjects)
-    val_df = make_window_df(val_subjects)
-    test_df = make_window_df(test_subjects)
+            # Truncate or keep up to window_size rows
+            window = seq_data.iloc[:window_size]
+            T_actual = len(window)
+
+            # --- IMU [T, 7] ---
+            if imu_cols_avail:
+                imu_raw = window[imu_cols_avail].values.astype(np.float32)  # [T_actual, n_imu]
+            else:
+                imu_raw = np.zeros((T_actual, len(IMU_COLS)), dtype=np.float32)
+            # Pad missing cols to exactly len(IMU_COLS)
+            if imu_raw.shape[1] < len(IMU_COLS):
+                imu_raw = np.pad(imu_raw, ((0, 0), (0, len(IMU_COLS) - imu_raw.shape[1])))
+            # Pad time dimension
+            if T_actual < window_size:
+                imu_raw = np.pad(imu_raw, ((0, window_size - T_actual), (0, 0)))
+            np.nan_to_num(imu_raw, copy=False, nan=0.0)
+
+            # --- Thermal [T, 5] ---
+            if thm_cols_avail:
+                thm_raw = window[thm_cols_avail].values.astype(np.float32)
+            else:
+                thm_raw = np.zeros((T_actual, len(THERMAL_COLS)), dtype=np.float32)
+            if thm_raw.shape[1] < len(THERMAL_COLS):
+                thm_raw = np.pad(thm_raw, ((0, 0), (0, len(THERMAL_COLS) - thm_raw.shape[1])))
+            if T_actual < window_size:
+                thm_raw = np.pad(thm_raw, ((0, window_size - T_actual), (0, 0)))
+            np.nan_to_num(thm_raw, copy=False, nan=0.0)
+
+            # --- ToF [T, 320] with invalidity mask ---
+            if tof_cols_avail:
+                tof_raw = window[tof_cols_avail].values.astype(np.float32)  # [T_actual, n_tof]
+            else:
+                tof_raw = np.zeros((T_actual, len(TOF_COLS)), dtype=np.float32)
+            if tof_raw.shape[1] < len(TOF_COLS):
+                tof_raw = np.pad(tof_raw, ((0, 0), (0, len(TOF_COLS) - tof_raw.shape[1])))
+            if T_actual < window_size:
+                tof_raw = np.pad(tof_raw, ((0, window_size - T_actual), (0, 0)))
+            # Mask: sentinel -1.0 = invalid
+            tof_mask = (tof_raw != TOF_INVALID_SENTINEL).astype(np.float32)
+            tof_clean = np.where(tof_raw == TOF_INVALID_SENTINEL, 0.0, tof_raw)
+            np.nan_to_num(tof_clean, copy=False, nan=0.0)
+            np.nan_to_num(tof_mask, copy=False, nan=0.0)
+
+            all_imu.append(imu_raw)
+            all_thm.append(thm_raw)
+            all_tof.append(tof_clean)
+            all_mask.append(tof_mask)
+            all_labels.append(label)
+
+        if not all_labels:
+            # Empty split (can happen with very small max_rows)
+            return (
+                np.zeros((0, window_size, len(IMU_COLS)), np.float32),
+                np.zeros((0, window_size, len(THERMAL_COLS)), np.float32),
+                np.zeros((0, window_size, len(TOF_COLS)), np.float32),
+                np.zeros((0, window_size, len(TOF_COLS)), np.float32),
+                np.zeros((0,), np.int64),
+            )
+
+        return (
+            np.stack(all_imu),  # [N, T, 7]
+            np.stack(all_thm),  # [N, T, 5]
+            np.stack(all_tof),  # [N, T, 320]
+            np.stack(all_mask),  # [N, T, 320]
+            np.array(all_labels, dtype=np.int64),
+        )
+
+    logger.info("  Extracting sequence windows for each split...")
+    tr_imu, tr_thm, tr_tof, tr_mask, tr_lbl = extract_split_arrays(train_subjects)
+    va_imu, va_thm, va_tof, va_mask, va_lbl = extract_split_arrays(val_subjects)
+    te_imu, te_thm, te_tof, te_mask, te_lbl = extract_split_arrays(test_subjects)
 
     logger.info(
         "  Splits: train=%d, val=%d, test=%d windows",
-        len(train_df),
-        len(val_df),
-        len(test_df),
+        len(tr_lbl),
+        len(va_lbl),
+        len(te_lbl),
     )
 
-    train_ds = ARSTRawCSVDataset(train_df, window_size=window_size)
-    val_ds = ARSTRawCSVDataset(val_df, window_size=window_size)
-    test_ds = ARSTRawCSVDataset(test_df, window_size=window_size)
+    train_ds = ARSTRawCSVDataset(
+        imu=tr_imu,
+        thermo=tr_thm,
+        tof=tr_tof,
+        tof_mask=tr_mask,
+        labels=tr_lbl,
+        n_classes=n_classes,
+        window_size=window_size,
+    )
+    val_ds = ARSTRawCSVDataset(
+        imu=va_imu,
+        thermo=va_thm,
+        tof=va_tof,
+        tof_mask=va_mask,
+        labels=va_lbl,
+        n_classes=n_classes,
+        window_size=window_size,
+    )
+    test_ds = ARSTRawCSVDataset(
+        imu=te_imu,
+        thermo=te_thm,
+        tof=te_tof,
+        tof_mask=te_mask,
+        labels=te_lbl,
+        n_classes=n_classes,
+        window_size=window_size,
+    )
 
-    n_classes = len(behavior_encoder)
+    # Class weights from TRAIN split only, always [n_classes] shape
     class_weights = train_ds.class_weights
 
     _loader_kwargs = {"num_workers": num_workers, "pin_memory": torch.cuda.is_available()}
