@@ -3,24 +3,22 @@
 # ============================================================
 # Phase 1 verified dims: IMU=7, Thermal=5, ToF=320
 # Default: early fusion (all 3 modalities → 332 features)
-# @package _global_
 
-model:
-  name: mlp
-  num_classes: 4
-  imu_channels: 7
-  thermal_channels: 5
-  tof_channels: 320
-  hidden_dims:
-    - 512
-    - 256
-    - 128
-  dropout: 0.3
-  active_modalities:
-    - imu
-    - thermo
-    - tof
+name: mlp
+num_classes: 4
+imu_channels: 7
+thermal_channels: 5
+tof_channels: 320
+hidden_dims:
+  - 512
+  - 256
+  - 128
+dropout: 0.3
+active_modalities:
+  - imu
+  - thermo
+  - tof
 
-  # Memory estimate:
-  #   in_features = 332, hidden=[512,256,128]
-  #   Params ≈ 1.2M  |  VRAM at batch=32 ≈ 0.4 GB
+# Memory estimate:
+#   in_features = 332, hidden=[512,256,128]
+#   Params ≈ 1.2M  |  VRAM at batch=32 ≈ 0.4 GB

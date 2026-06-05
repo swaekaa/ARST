@@ -3,23 +3,21 @@
 # ============================================================
 # Per-modality BiLSTM branches with attention pooling
 # ToF projected to lstm_input_dim=64 before LSTM
-# @package _global_
 
-model:
-  name: lstm
-  num_classes: 4
-  imu_channels: 7
-  thermal_channels: 5
-  tof_channels: 320
-  lstm_input_dim: 64      # Projects all modalities to this dim before LSTM
-  hidden_size: 128         # Per-direction; BiLSTM output = 256
-  num_layers: 2
-  head_hidden_dim: 256
-  dropout: 0.3
-  active_modalities:
-    - imu
-    - thermo
-    - tof
+name: lstm
+num_classes: 4
+imu_channels: 7
+thermal_channels: 5
+tof_channels: 320
+lstm_input_dim: 64      # Projects all modalities to this dim before LSTM
+hidden_size: 128         # Per-direction; BiLSTM output = 256
+num_layers: 2
+head_hidden_dim: 256
+dropout: 0.3
+active_modalities:
+  - imu
+  - thermo
+  - tof
 
-  # Memory estimate:
-  #   Params ≈ 2.1M  |  VRAM at batch=32 ≈ 1.1 GB (LSTM states)
+# Memory estimate:
+#   Params ≈ 2.1M  |  VRAM at batch=32 ≈ 1.1 GB (LSTM states)

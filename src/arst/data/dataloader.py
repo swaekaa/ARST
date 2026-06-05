@@ -273,13 +273,21 @@ def build_csv_loaders(
         for seq_id, seq_data in sub_df.groupby("sequence_id"):
             seq_data = seq_data.sort_values("sequence_counter")
             label = int(seq_data["label"].mode()[0])
-            # Aggregate: take the first window_size rows
+            # Aggregate: use up to window_size rows, compute column mean ignoring NaN.
+            # Using values[0] was the NaN root cause: 6.8% of sequences have NaN
+            # in their first row, which propagates directly into training tensors.
             window_data = seq_data.iloc[:window_size]
             row: dict = {"sequence_id": seq_id, "label": label}
-            # Store first-row values (flat format for ARSTRawCSVDataset)
             for col in IMU_COLS + THERMAL_COLS + TOF_COLS:
                 if col in window_data.columns:
-                    row[col] = window_data[col].values[0] if len(window_data) > 0 else 0.0
+                    col_vals = window_data[col].values
+                    if len(col_vals) == 0 or np.all(np.isnan(col_vals)):
+                        row[col] = 0.0
+                    else:
+                        mean_val = float(np.nanmean(col_vals))
+                        row[col] = mean_val if np.isfinite(mean_val) else 0.0
+                else:
+                    row[col] = 0.0
             windows.append(row)
         return pd.DataFrame(windows)
 

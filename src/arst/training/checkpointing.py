@@ -67,7 +67,7 @@ def save_best(
 
     torch.save(payload, path)
     logger.info(
-        "save_best: new best %.4f → %.4f at epoch %d — saved to %s",
+        "save_best: new best %.4f -> %.4f at epoch %d -- saved to %s",
         best_value,
         metric_value,
         epoch,
@@ -107,7 +107,7 @@ def save_last(
         payload.update(extra)
 
     torch.save(payload, path)
-    logger.debug("save_last: epoch %d → %s", epoch, path)
+    logger.debug("save_last: epoch %d -> %s", epoch, path)
     return path
 
 

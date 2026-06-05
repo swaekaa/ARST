@@ -1,51 +1,49 @@
 # ============================================================
 # Data Configuration — Phase 2 Baseline
 # ============================================================
-# @package _global_
 
-data:
-  # ── Paths ────────────────────────────────────────────────
-  csv_path: data/raw/train.csv         # Phase 1 verified flat CSV (1.1 GB)
-  hdf5_path: data/processed/train_windows.h5  # Produced by preprocess.py (Phase 3+)
+# ── Paths ────────────────────────────────────────────────
+csv_path: data/raw/train.csv         # Phase 1 verified flat CSV (1.1 GB)
+hdf5_path: data/processed/train_windows.h5  # Produced by preprocess.py (Phase 3+)
 
-  # ── Data format ──────────────────────────────────────────
-  # Use CSV-backed loaders for Phase 2 (no HDF5 needed yet)
-  use_hdf5: false
+# ── Data format ──────────────────────────────────────────
+# Use CSV-backed loaders for Phase 2 (no HDF5 needed yet)
+use_hdf5: false
 
-  # ── Window / sequence parameters ─────────────────────────
-  # Phase 1 EDA: P25 = 51, P95 = 127, max = 700
-  # T=64 chosen: covers > P25, round number, fits 4 GB VRAM
-  window_size: 64
+# ── Window / sequence parameters ─────────────────────────
+# Phase 1 EDA: P25 = 51, P95 = 127, max = 700
+# T=64 chosen: covers > P25, round number, fits 4 GB VRAM
+window_size: 64
 
-  # ── Modalities ───────────────────────────────────────────
-  # Phase 1 verified channel counts
-  imu_channels: 7        # acc_x/y/z + rot_w/x/y/z (quaternion)
-  thermal_channels: 5    # thm_1 … thm_5 (linear array)
-  tof_channels: 320      # tof_1_v0 … tof_5_v63 (5 sensors × 64 pixels)
+# ── Modalities ───────────────────────────────────────────
+# Phase 1 verified channel counts
+imu_channels: 7        # acc_x/y/z + rot_w/x/y/z (quaternion)
+thermal_channels: 5    # thm_1 … thm_5 (linear array)
+tof_channels: 320      # tof_1_v0 … tof_5_v63 (5 sensors × 64 pixels)
 
-  # Active modalities for this run.
-  # Options: [imu], [thermo], [tof], [imu, thermo], [imu, tof], [imu, thermo, tof]
-  active_modalities:
-    - imu
-    - thermo
-    - tof
+# Active modalities for this run.
+# Options: [imu], [thermo], [tof], [imu, thermo], [imu, tof], [imu, thermo, tof]
+active_modalities:
+  - imu
+  - thermo
+  - tof
 
-  # ── Splits ───────────────────────────────────────────────
-  # Subject-based splits (prevents data leakage across subjects)
-  val_fraction: 0.15
-  test_fraction: 0.15
-  seed: 42
+# ── Splits ───────────────────────────────────────────────
+# Subject-based splits (prevents data leakage across subjects)
+val_fraction: 0.15
+test_fraction: 0.15
+seed: 42
 
-  # ── DataLoader settings ──────────────────────────────────
-  batch_size: 32
-  num_workers: 0           # 0 = main process (safe for Windows; increase on Linux)
-  pin_memory: true
+# ── DataLoader settings ──────────────────────────────────
+batch_size: 32
+num_workers: 0           # 0 = main process (safe for Windows; increase on Linux)
+pin_memory: true
 
-  # ── Class imbalance handling ─────────────────────────────
-  # Phase 1: 3.79× imbalance ratio.
-  use_weighted_sampler: false   # Alternative to Focal Loss; don't use both
-  max_rows: null                # null = all rows; set e.g. 50000 for quick debug
+# ── Class imbalance handling ─────────────────────────────
+# Phase 1: 3.79× imbalance ratio.
+use_weighted_sampler: false   # Alternative to Focal Loss; don't use both
+max_rows: null                # null = all rows; set e.g. 50000 for quick debug
 
-  # ── Preprocessing (applied in dataset.__getitem__) ───────
-  normalize: true               # Z-score normalisation (fit on train)
-  tof_fill_invalid: 0.0         # Replace -1.0 sentinel with 0.0
+# ── Preprocessing (applied in dataset.__getitem__) ───────
+normalize: true               # Z-score normalisation (fit on train)
+tof_fill_invalid: 0.0         # Replace -1.0 sentinel with 0.0

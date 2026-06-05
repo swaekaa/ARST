@@ -61,6 +61,12 @@ def get_device(device_str: str | None = None) -> torch.device:
     Returns:
         :class:`torch.device`.
     """
+    # ── Startup diagnostics ──────────────────────────────────────────────
+    logger.info("PyTorch version  : %s", torch.__version__)
+    logger.info("CUDA version     : %s", torch.version.cuda or "N/A (CPU-only build)")
+    logger.info("CUDA available   : %s", torch.cuda.is_available())
+    logger.info("Device count     : %d", torch.cuda.device_count())
+
     if device_str is not None:
         return torch.device(device_str)
 
@@ -68,13 +74,37 @@ def get_device(device_str: str | None = None) -> torch.device:
         device = torch.device("cuda")
         gpu_name = torch.cuda.get_device_name(0)
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-        logger.info("Device: %s  (%.1f GB VRAM)", gpu_name, vram_gb)
+        logger.info("GPU              : %s  (%.1f GB VRAM)", gpu_name, vram_gb)
+        logger.info("Selected device  : cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         device = torch.device("mps")
-        logger.info("Device: Apple MPS")
+        logger.info("Selected device  : Apple MPS")
     else:
         device = torch.device("cpu")
-        logger.warning("Device: CPU — training will be slow.")
+        _cuda_build = torch.version.cuda
+        if _cuda_build is None:
+            # CPU-only PyTorch installed -- provide exact fix
+            import sys
+
+            _msg = (
+                "\n"
+                "========================================================\n"
+                "  WARNING: CPU-only PyTorch detected!\n"
+                "  NVIDIA GPU is present but torch.cuda.is_available()\n"
+                "  returns False because a CPU-only wheel is installed.\n"
+                "\n"
+                "  Fix: reinstall PyTorch with CUDA 12.1 support:\n"
+                "\n"
+                "    pip uninstall torch torchvision torchaudio -y\n"
+                "    pip install torch torchvision torchaudio \\\n"
+                "        --index-url https://download.pytorch.org/whl/cu121\n"
+                "\n"
+                '  Then verify with: python -c "import torch; print(torch.cuda.is_available())"\n'
+                "========================================================\n"
+            )
+            print(_msg, file=sys.stderr, flush=True)
+            logger.warning(_msg)
+        logger.warning("Selected device  : CPU -- training will be slow.")
 
     return device
 

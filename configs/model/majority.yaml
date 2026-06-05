@@ -1,9 +1,7 @@
 # ============================================================
 # Model Config — Majority / Random Baseline
 # ============================================================
-# @package _global_
 
-model:
-  name: majority
-  num_classes: 4
-  majority_class: 0   # will be overridden at runtime by fit()
+name: majority
+num_classes: 4
+majority_class: 0   # will be overridden at runtime by fit()

@@ -25,7 +25,6 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler  # type: ignore[attr-defined]
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -98,7 +97,9 @@ class Trainer:
         self.monitor_metric = monitor_metric
         self.monitor_mode = monitor_mode
 
-        self.scaler = GradScaler(enabled=self.mixed_precision)
+        # GradScaler: only enabled on CUDA; use device-agnostic API (torch >= 2.3)
+        _scaler_device = "cuda" if self.mixed_precision else "cpu"
+        self.scaler = torch.amp.GradScaler(_scaler_device, enabled=self.mixed_precision)
         self._train_metrics = MetricsCalculator(num_classes=num_classes, class_names=class_names)
         self._val_metrics = MetricsCalculator(num_classes=num_classes, class_names=class_names)
         self._best_metric: float = float("-inf") if monitor_mode == "max" else float("inf")
@@ -240,6 +241,18 @@ class Trainer:
                 logits = self.model(imu=imu, thermo=thermo, tof=tof, tof_mask=tof_mask)
                 loss = self.loss_fn(logits, labels)
                 loss = loss / self.accumulation_steps
+
+            # ── NaN guard ──────────────────────────────────────────────────
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    f"NaN/Inf loss detected at epoch step {step}: "
+                    f"loss={loss.item():.6f}  "
+                    f"logits_nan={logits.isnan().any().item()}  "
+                    f"logits_inf={logits.isinf().any().item()}  "
+                    f"imu_nan={imu.isnan().any().item()}  "
+                    f"thermo_nan={thermo.isnan().any().item()}  "
+                    f"tof_nan={tof.isnan().any().item()}"
+                )
 
             self.scaler.scale(loss).backward()
 

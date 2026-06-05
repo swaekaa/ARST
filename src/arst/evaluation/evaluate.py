@@ -122,14 +122,14 @@ def _save_evaluation_outputs(
     json_path = output_dir / f"{split_name}_metrics.json"
     with json_path.open("w") as f:
         json.dump(scalar_metrics, f, indent=2)
-    logger.info("Saved scalar metrics → %s", json_path)
+    logger.info("Saved scalar metrics -> %s", json_path)
 
     # Confusion matrix → NPY
     cm = metrics.get("confusion_matrix")
     if cm is not None:
         cm_path = output_dir / f"{split_name}_confusion_matrix.npy"
         np.save(cm_path, cm)
-        logger.info("Saved confusion matrix → %s", cm_path)
+        logger.info("Saved confusion matrix -> %s", cm_path)
 
         # Visualisation (optional)
         _save_confusion_matrix_plot(cm, output_dir, split_name, metrics.get("class_names"))
@@ -142,7 +142,7 @@ def _save_evaluation_outputs(
             f.write("class,f1\n")
             for cls_name, f1 in f1_per_class.items():
                 f.write(f'"{cls_name}",{f1:.6f}\n')
-        logger.info("Saved per-class F1 → %s", csv_path)
+        logger.info("Saved per-class F1 -> %s", csv_path)
 
 
 def _save_confusion_matrix_plot(
@@ -159,7 +159,7 @@ def _save_confusion_matrix_plot(
         import matplotlib.pyplot as plt
         import seaborn as sns
     except ImportError:
-        logger.debug("matplotlib/seaborn not available — skipping confusion matrix plot.")
+        logger.debug("matplotlib/seaborn not available -- skipping confusion matrix plot.")
         return
 
     n = cm.shape[0]
@@ -190,4 +190,4 @@ def _save_confusion_matrix_plot(
     plot_path = output_dir / f"{split_name}_confusion_matrix.png"
     fig.savefig(plot_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    logger.info("Saved confusion matrix plot → %s", plot_path)
+    logger.info("Saved confusion matrix plot -> %s", plot_path)
