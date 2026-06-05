@@ -1,0 +1,27 @@
+# ============================================================
+# Model Config — CNN Baseline
+# ============================================================
+# Per-modality 1D-CNN branches: kernel sizes [3, 7]
+# ToF 320 → 64 projection before CNN to control parameter count
+# @package _global_
+
+model:
+  name: cnn
+  num_classes: 4
+  imu_channels: 7
+  thermal_channels: 5
+  tof_channels: 320
+  cnn_out_channels: 64
+  kernel_sizes:
+    - 3
+    - 7
+  tof_proj_dim: 64         # 320 → 64 before CNN (controls param count)
+  head_hidden_dim: 256
+  dropout: 0.3
+  active_modalities:
+    - imu
+    - thermo
+    - tof
+
+  # Memory estimate:
+  #   Params ≈ 1.8M  |  VRAM at batch=32 ≈ 0.7 GB

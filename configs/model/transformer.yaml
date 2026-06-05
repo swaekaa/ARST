@@ -1,0 +1,34 @@
+# ============================================================
+# Model Config — Transformer Baseline
+# ============================================================
+# Strongest non-ARST baseline.
+# Per-modality projections + shared Transformer encoder with CLS token.
+# d_model=128, L=2 chosen for RTX 3060 4 GB budget (Phase 2).
+# @package _global_
+
+model:
+  name: transformer
+  num_classes: 4
+  imu_channels: 7
+  thermal_channels: 5
+  tof_channels: 320
+  d_model: 128             # Embedding dim (128 for Phase 2 VRAM budget)
+  num_layers: 2            # Transformer depth (increase to 4 in Phase 3+)
+  num_heads: 4             # Must divide d_model
+  d_ff: 512                # Feed-forward dimension (4× d_model)
+  dropout: 0.1
+  pool_type: cls           # "cls" | "mean"
+  active_modalities:
+    - imu
+    - thermo
+    - tof
+
+  # Memory estimate:
+  #   Params ≈ 2.4M  |  VRAM at batch=32, T=64 ≈ 1.4 GB
+  # At inference (T_seq = T * n_modalities = 64*3 = 192 tokens + 1 CLS):
+  #   Attention matrix: 193 × 193 × 4 heads = ~149K elements/batch
+
+  # Phase 3 upgrade path:
+  #   d_model: 256
+  #   num_layers: 4
+  #   num_heads: 8

@@ -1,0 +1,12 @@
+# ============================================================
+# Experiment Config — Baseline Default
+# ============================================================
+# Shared experiment settings for all Phase 2 baseline runs.
+# @package _global_
+
+experiment:
+  name: baseline_default
+  description: "Phase 2 baseline benchmark run"
+  tags:
+    - phase2
+    - baseline

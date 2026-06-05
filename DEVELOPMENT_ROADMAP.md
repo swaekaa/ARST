@@ -84,28 +84,28 @@ ARST Fusion   →  Robustness  →  Evaluation    →  Explainability
 
 ### 2.1 Feature Extraction Baseline (MLP)
 
-- [ ] Implement statistical feature extraction (mean, std, min, max, skewness, kurtosis per channel)
-- [ ] Implement `MLPBaseline`: flat feature vector → MLP → classification
-- [ ] Train with standard CE loss + class weights
+- [x] Implement statistical feature extraction (mean, std, min, max, skewness, kurtosis per channel)
+- [x] Implement `MLPBaseline`: flat feature vector → MLP → classification
+- [x] Train with standard CE loss + class weights
 - [ ] Evaluate on val set (Macro F1, Balanced Accuracy, AUROC)
 
 ### 2.2 Convolutional Baseline (CNN)
 
-- [ ] Implement `CNNBaseline`: multi-scale 1D CNN per modality + concat fusion
-- [ ] Kernel sizes: [3, 7, 15] → feature pyramid → global avg pool → MLP
+- [x] Implement `CNNBaseline`: multi-scale 1D CNN per modality + concat fusion
+- [x] Kernel sizes: [3, 7, 15] → feature pyramid → global avg pool → MLP
 - [ ] Train and evaluate
 
 ### 2.3 Recurrent Baseline (BiLSTM)
 
-- [ ] Implement `LSTMBaseline`: bidirectional LSTM per modality + concat fusion
-- [ ] Variable-length support via packing/masking
+- [x] Implement `LSTMBaseline`: bidirectional LSTM per modality + concat fusion
+- [x] Variable-length support via packing/masking
 - [ ] Train and evaluate
 
 ### 2.4 Transformer Baseline
 
-- [ ] Implement `TransformerBaseline`: concatenate all modalities + Transformer encoder
-- [ ] Sinusoidal or learned positional encoding
-- [ ] [CLS] token for classification
+- [x] Implement `TransformerBaseline`: concatenate all modalities + Transformer encoder
+- [x] Sinusoidal or learned positional encoding
+- [x] [CLS] token for classification
 - [ ] Train and evaluate
 
 ### 2.5 Analysis

@@ -1,0 +1,27 @@
+# ============================================================
+# Experiment Override — Transformer Baseline
+# ============================================================
+# @package _global_
+
+defaults:
+  - override /model: transformer
+  - _self_
+
+experiment:
+  name: baseline_transformer
+  description: "Transformer baseline: modality projection + shared Transformer encoder"
+  tags:
+    - phase2
+    - baseline
+    - transformer
+
+training:
+  epochs: 100
+  batch_size: 32
+  accumulation_steps: 4     # Effective batch = 128
+
+wandb:
+  enabled: false
+  tags:
+    - baseline
+    - transformer

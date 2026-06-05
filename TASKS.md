@@ -139,30 +139,30 @@
 ## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ### MLP Baseline
-- [ ] Implement `src/arst/models/baselines/mlp.py`
-- [ ] Config: `configs/model/baseline_mlp.yaml`
+- [x] Implement `src/arst/models/baselines/mlp.py`
+- [x] Config: `configs/model/baseline_mlp.yaml`
 - [ ] Train: `python scripts/train.py --config-name baseline_mlp`
 - [ ] Evaluate and log to W&B
 
 ### CNN Baseline
-- [ ] Implement `src/arst/models/baselines/cnn.py`
-- [ ] Config: `configs/model/baseline_cnn.yaml`
+- [x] Implement `src/arst/models/baselines/cnn.py`
+- [x] Config: `configs/model/baseline_cnn.yaml`
 - [ ] Train and evaluate
 
 ### LSTM Baseline
-- [ ] Implement `src/arst/models/baselines/lstm.py`
-- [ ] Config: `configs/model/baseline_lstm.yaml`
+- [x] Implement `src/arst/models/baselines/lstm.py`
+- [x] Config: `configs/model/baseline_lstm.yaml`
 - [ ] Train and evaluate
 
 ### Transformer Baseline
-- [ ] Implement `src/arst/models/baselines/transformer.py`
-- [ ] Config: `configs/model/baseline_transformer.yaml`
+- [x] Implement `src/arst/models/baselines/transformer.py`
+- [x] Config: `configs/model/baseline_transformer.yaml`
 - [ ] Train and evaluate
 
 ### Baseline Comparison
 - [ ] `notebooks/12_baseline_comparison.ipynb`
 - [ ] Leaderboard table: F1, Balanced Acc, AUROC, Latency
-- [ ] Report: `reports/phase2_baseline_report.md`
+- [x] Report: `reports/baseline_benchmark_template.md`
 
 ---
 

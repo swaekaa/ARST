@@ -1,0 +1,27 @@
+# ============================================================
+# Experiment Override — LSTM Baseline
+# ============================================================
+# @package _global_
+
+defaults:
+  - override /model: lstm
+  - _self_
+
+experiment:
+  name: baseline_lstm
+  description: "BiLSTM baseline: per-modality BiLSTM + attention pooling"
+  tags:
+    - phase2
+    - baseline
+    - lstm
+
+training:
+  epochs: 80
+  batch_size: 32
+  accumulation_steps: 2
+
+wandb:
+  enabled: false
+  tags:
+    - baseline
+    - lstm

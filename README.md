@@ -244,7 +244,7 @@ python scripts/run_ablation.py --config configs/ablation/full_suite.yaml
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Dataset Exploration & EDA | ✅ Complete |
-| 2 | Baseline Models | 🔲 |
+| 2 | Baseline Models | ✅ Complete |
 | 3 | Sensor-Specific Encoders | 🔲 |
 | 4 | Reliability Estimation Module | 🔲 |
 | 5 | Adaptive Fusion Transformer | 🔲 |

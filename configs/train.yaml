@@ -1,0 +1,32 @@
+# ============================================================
+# Root Hydra Configuration for ARST Phase 2
+# ============================================================
+# Usage:
+#   python train.py model=mlp
+#   python train.py model=transformer training.epochs=50
+#   python train.py model=cnn data.active_modalities=[imu]
+#
+# @package _global_
+
+defaults:
+  - _self_
+  - model: mlp                    # Override with: model=cnn / lstm / transformer
+  - data: default
+  - training: default
+  - experiment: baseline_default
+  - override hydra/output: custom
+
+# Top-level keys
+seed: 42
+deterministic: false
+
+# Weights & Biases
+wandb:
+  enabled: false                  # Set to true when W&B credentials are configured
+  project: "arst-behavior-recognition"
+  entity: null
+  tags: []
+
+# Output directories (Hydra will auto-append run-specific subdirs)
+output_dir: outputs/evaluation
+experiment_dir: experiments

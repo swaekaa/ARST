@@ -1,8 +1,19 @@
 """
-Baseline MLP model for behavior recognition.
+MLP Baseline for ARST Phase 2.
 
-Flattens all modality features into a single vector, applies statistical
-aggregation over the time axis, then runs a multi-layer perceptron.
+Architecture:
+    Input: [B, T, C_imu] + [B, T, C_thm] + [B, T, C_tof]
+        → Temporal mean pooling per modality
+        → Concatenate active modality features
+        → BatchNorm → Linear → GELU → Dropout (× N layers)
+        → Linear → logits [B, num_classes]
+
+Design notes:
+    - Correct Phase 1 dims: IMU=7, Thermal=5, ToF=320.
+    - ``active_modalities`` controls which modalities are used.
+      This is critical for Phase 7 ablation studies (unimodal comparisons).
+    - Default: all three modalities concatenated (332 features).
+    - ToF mask is accepted but ignored by this baseline (no reliability).
 """
 
 from __future__ import annotations
@@ -10,38 +21,68 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+# Phase 1 verified channel counts
+_IMU_CH = 7
+_THM_CH = 5
+_TOF_CH = 320
+
 
 class MLPBaseline(nn.Module):
     """
     MLP Baseline: temporal mean pooling + multi-layer perceptron.
 
-    No temporal modeling — treats each sequence as a fixed feature vector.
-    Serves as a lower-bound performance reference.
+    No temporal modelling — treats each window as a fixed feature vector.
+    Serves as the lowest learned-model performance reference.
 
     Args:
-        imu_channels: IMU feature channels (default 6).
-        thermal_channels: Thermopile channels (default 64).
-        tof_channels: ToF channels (default 64).
-        hidden_dims: MLP hidden layer sizes.
-        num_classes: Number of behavior classes.
-        dropout: Dropout probability.
+        num_classes:       Number of behavior classes (4 from Phase 1 EDA).
+        imu_channels:      IMU feature channels (7: acc_xyz + quaternion).
+        thermal_channels:  Thermopile channels (5: linear array).
+        tof_channels:      ToF channels (320: 5 sensors × 64 pixels).
+        hidden_dims:       MLP hidden layer widths (list).
+        dropout:           Dropout probability applied after each hidden layer.
+        active_modalities: Which modalities to use.  Controls input dimension.
+            Options: ``["imu"]``, ``["thermo"]``, ``["tof"]``,
+            ``["imu", "thermo", "tof"]`` (default — early fusion).
     """
 
     def __init__(
         self,
-        imu_channels: int = 6,
-        thermal_channels: int = 64,
-        tof_channels: int = 64,
-        hidden_dims: list[int] = [512, 256, 128],
-        num_classes: int = 10,
+        num_classes: int = 4,
+        imu_channels: int = _IMU_CH,
+        thermal_channels: int = _THM_CH,
+        tof_channels: int = _TOF_CH,
+        hidden_dims: list[int] | None = None,
         dropout: float = 0.3,
-    ):
+        active_modalities: list[str] | None = None,
+    ) -> None:
         super().__init__()
-        in_features = imu_channels + thermal_channels + tof_channels
 
-        layers = []
+        self.active_modalities: list[str] = (
+            active_modalities if active_modalities is not None else ["imu", "thermo", "tof"]
+        )
+        self.imu_channels = imu_channels
+        self.thermal_channels = thermal_channels
+        self.tof_channels = tof_channels
+
+        # Compute input feature size based on active modalities
+        in_features = 0
+        if "imu" in self.active_modalities:
+            in_features += imu_channels
+        if "thermo" in self.active_modalities:
+            in_features += thermal_channels
+        if "tof" in self.active_modalities:
+            in_features += tof_channels
+
+        if in_features == 0:
+            raise ValueError("At least one modality must be active.")
+
+        _hidden_dims: list[int] = hidden_dims if hidden_dims is not None else [512, 256, 128]
+
+        # Build MLP
+        layers: list[nn.Module] = []
         prev_dim = in_features
-        for hdim in hidden_dims:
+        for hdim in _hidden_dims:
             layers.extend(
                 [
                     nn.Linear(prev_dim, hdim),
@@ -58,25 +99,35 @@ class MLPBaseline(nn.Module):
     def forward(
         self,
         imu: torch.Tensor,
-        thermo: torch.Tensor,
-        tof: torch.Tensor,
+        thermo: torch.Tensor | None = None,
+        tof: torch.Tensor | None = None,
+        tof_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """
         Args:
-            imu:    [B, T, 6]
-            thermo: [B, T, 64]
-            tof:    [B, T, 64]
+            imu:      [B, T, 7]    IMU sequence (acc + quaternion).
+            thermo:   [B, T, 5]    Thermopile sequence (may be None if inactive).
+            tof:      [B, T, 320]  ToF sequence (may be None if inactive).
+            tof_mask: [B, T, 320]  ToF validity mask — accepted but ignored
+                                   (no reliability module in Phase 2).
 
         Returns:
             logits: [B, num_classes]
         """
-        # Temporal mean pooling
-        imu_feat = imu.mean(dim=1)  # [B, 6]
-        therm_feat = thermo.mean(dim=1)  # [B, 64]
-        tof_feat = tof.mean(dim=1)  # [B, 64]
+        parts: list[torch.Tensor] = []
 
-        # Concatenate all modalities
-        x = torch.cat([imu_feat, therm_feat, tof_feat], dim=-1)  # [B, 134]
+        if "imu" in self.active_modalities:
+            assert imu is not None, "IMU tensor required but not provided."
+            parts.append(imu.mean(dim=1))  # [B, 7]
 
+        if "thermo" in self.active_modalities:
+            assert thermo is not None, "Thermal tensor required but not provided."
+            parts.append(thermo.mean(dim=1))  # [B, 5]
+
+        if "tof" in self.active_modalities:
+            assert tof is not None, "ToF tensor required but not provided."
+            parts.append(tof.mean(dim=1))  # [B, 320]
+
+        x = torch.cat(parts, dim=-1)  # [B, in_features]
         return self.mlp(x)  # [B, num_classes]

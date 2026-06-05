@@ -1,107 +1,51 @@
 # ============================================================
-# ARST Default Data Configuration
+# Data Configuration — Phase 2 Baseline
 # ============================================================
-
 # @package _global_
 
-defaults:
-  - _self_
-
 data:
-  # --- Paths ---
-  raw_dir: ${hydra:runtime.cwd}/data/raw
-  processed_dir: ${hydra:runtime.cwd}/data/processed
-  interim_dir: ${hydra:runtime.cwd}/data/interim
+  # ── Paths ────────────────────────────────────────────────
+  csv_path: data/raw/train.csv         # Phase 1 verified flat CSV (1.1 GB)
+  hdf5_path: data/processed/train_windows.h5  # Produced by preprocess.py (Phase 3+)
 
-  # --- Modalities ---
-  modalities:
+  # ── Data format ──────────────────────────────────────────
+  # Use CSV-backed loaders for Phase 2 (no HDF5 needed yet)
+  use_hdf5: false
+
+  # ── Window / sequence parameters ─────────────────────────
+  # Phase 1 EDA: P25 = 51, P95 = 127, max = 700
+  # T=64 chosen: covers > P25, round number, fits 4 GB VRAM
+  window_size: 64
+
+  # ── Modalities ───────────────────────────────────────────
+  # Phase 1 verified channel counts
+  imu_channels: 7        # acc_x/y/z + rot_w/x/y/z (quaternion)
+  thermal_channels: 5    # thm_1 … thm_5 (linear array)
+  tof_channels: 320      # tof_1_v0 … tof_5_v63 (5 sensors × 64 pixels)
+
+  # Active modalities for this run.
+  # Options: [imu], [thermo], [tof], [imu, thermo], [imu, tof], [imu, thermo, tof]
+  active_modalities:
     - imu
-    - thermopile
+    - thermo
     - tof
 
-  # --- Windowing ---
-  window_size: 256          # timesteps (IMU @ 50Hz → 5.12 seconds)
-  window_stride: 128        # 50% overlap during training
-  window_stride_eval: 256   # No overlap at inference
-  pad_mode: "zero"          # "zero" | "reflect" | "tile"
+  # ── Splits ───────────────────────────────────────────────
+  # Subject-based splits (prevents data leakage across subjects)
+  val_fraction: 0.15
+  test_fraction: 0.15
+  seed: 42
 
-  # --- IMU ---
-  imu:
-    channels: ["acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z"]
-    n_channels: 6
-    sampling_rate: 50        # Hz
-    bandpass_low: 0.5        # Hz
-    bandpass_high: 20.0      # Hz
-    remove_gravity: true
-    normalization: "zscore"  # "zscore" | "minmax" | "none"
+  # ── DataLoader settings ──────────────────────────────────
+  batch_size: 32
+  num_workers: 0           # 0 = main process (safe for Windows; increase on Linux)
+  pin_memory: true
 
-  # --- Thermopile ---
-  thermopile:
-    grid_size: [8, 8]
-    n_channels: 64
-    sampling_rate: 10        # Hz
-    dead_pixel_threshold: 5.0   # std deviations from median
-    background_window: 100      # frames for running baseline
-    normalization: "zscore"
+  # ── Class imbalance handling ─────────────────────────────
+  # Phase 1: 3.79× imbalance ratio.
+  use_weighted_sampler: false   # Alternative to Focal Loss; don't use both
+  max_rows: null                # null = all rows; set e.g. 50000 for quick debug
 
-  # --- ToF ---
-  tof:
-    grid_size: [8, 8]
-    n_channels: 64
-    sampling_rate: 10        # Hz
-    min_depth_mm: 0
-    max_depth_mm: 1000
-    invalid_value: -1        # raw invalid return value
-    normalization: "minmax"
-
-  # --- Feature Engineering ---
-  feature_engineering:
-    enabled: false           # set true to enable extra features
-    imu:
-      enmo: true
-      jerk: true
-      tilt: false
-      stft: false
-    thermopile:
-      centroid: true
-      spread: true
-      entropy: false
-    tof:
-      gradients: true
-      motion_flow: false
-
-  # --- Split ---
-  split:
-    train_ratio: 0.70
-    val_ratio: 0.15
-    test_ratio: 0.15
-    stratify: true
-    subject_aware: true       # prevent data leakage across subjects
-    seed: 42
-
-  # --- DataLoader ---
-  dataloader:
-    batch_size: 32
-    num_workers: 4
-    pin_memory: true
-    persistent_workers: true
-    prefetch_factor: 2
-
-  # --- Augmentation (training only) ---
-  augmentation:
-    enabled: true
-    random_time_warp:
-      enabled: true
-      sigma: 0.2
-    random_channel_noise:
-      enabled: true
-      sigma: 0.05
-    random_modality_drop:
-      enabled: false          # enable in Phase 6
-      p_drop: 0.2
-    random_time_shift:
-      enabled: true
-      max_shift: 20
-    magnitude_scaling:
-      enabled: true
-      range: [0.9, 1.1]
+  # ── Preprocessing (applied in dataset.__getitem__) ───────
+  normalize: true               # Z-score normalisation (fit on train)
+  tof_fill_invalid: 0.0         # Replace -1.0 sentinel with 0.0

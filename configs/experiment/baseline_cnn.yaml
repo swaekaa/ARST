@@ -1,0 +1,27 @@
+# ============================================================
+# Experiment Override — CNN Baseline
+# ============================================================
+# @package _global_
+
+defaults:
+  - override /model: cnn
+  - _self_
+
+experiment:
+  name: baseline_cnn
+  description: "CNN baseline: per-modality 1D-CNN + classifier"
+  tags:
+    - phase2
+    - baseline
+    - cnn
+
+training:
+  epochs: 80
+  batch_size: 32
+  accumulation_steps: 2
+
+wandb:
+  enabled: false
+  tags:
+    - baseline
+    - cnn

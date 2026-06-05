@@ -1,0 +1,29 @@
+# ============================================================
+# Experiment Override — MLP Baseline
+# ============================================================
+# Overrides for a full MLP baseline run.
+# Usage: python train.py experiment=baseline_mlp
+# @package _global_
+
+defaults:
+  - override /model: mlp
+  - _self_
+
+experiment:
+  name: baseline_mlp
+  description: "MLP baseline: mean-pooled features + MLP classifier"
+  tags:
+    - phase2
+    - baseline
+    - mlp
+
+training:
+  epochs: 80
+  batch_size: 64          # MLP is cheap — use larger batches
+  accumulation_steps: 1
+
+wandb:
+  enabled: false
+  tags:
+    - baseline
+    - mlp
