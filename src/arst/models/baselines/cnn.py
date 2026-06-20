@@ -81,7 +81,7 @@ class CNNBaseline(nn.Module):
         kernel_sizes: tuple[int, ...] = (3, 7),
         tof_proj_dim: int = 64,
         head_hidden_dim: int = 256,
-        dropout: float = 0.3,
+        dropout: float = 0.1,
         active_modalities: list[str] | None = None,
     ) -> None:
         super().__init__()
@@ -110,8 +110,10 @@ class CNNBaseline(nn.Module):
         if fused_dim == 0:
             raise ValueError("At least one modality must be active.")
 
-        # Classification head
+        # Classification head — LayerNorm before head stabilises fused features
+        # (matches LSTM baseline pattern that achieves F1=0.39)
         self.head = nn.Sequential(
+            nn.LayerNorm(fused_dim),
             nn.Linear(fused_dim, head_hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),

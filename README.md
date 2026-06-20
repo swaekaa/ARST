@@ -13,6 +13,8 @@
 
 [Paper](#) · [Experiments](#experiments) · [Dataset](https://www.kaggle.com/competitions/child-mind-institute-detect-sleep-states) · [Weights & Biases](https://wandb.ai/)
 
+**Current Stage:** PHASE 2.6 — BASELINE REPAIR
+**Status:** ACTIVE DEVELOPMENT
 </div>
 
 ---
@@ -241,26 +243,106 @@ Outputs: `reports/baseline_benchmark_results.md`, `outputs/benchmarks/*.png`
 ---
 
 
+
+## Current Project Status
+
+**Phase 1**
+* Complete
+
+**Phase 2**
+* Complete
+
+**Phase 2.5**
+* Complete
+
+**Phase 2.6**
+* In Progress
+
+**Phase 3**
+* Not Started
+
+---
+
 ## 📊 Baseline Benchmark Results (Phase 2.5)
 
 > All models trained with identical experimental conditions (seed=42, AdamW, Focal Loss, 100 epochs).
 
-| Model | Accuracy | Macro F1 | Weighted F1 | Params |
-|---|---|---|---|---|
-| Random | 0.7850 | **0.2199** | 0.6904 | 0 (non-parametric) |
-| Majority | 0.7850 | **0.2199** | 0.6904 | 0 (non-parametric) |
-| MLP | 0.6410 | **0.3179** | 0.6933 | 337,028 |
-| CNN | 0.0286 | **0.0278** | 0.0022 | 172,356 |
-| LSTM | 0.6484 | **0.3896** | 0.7143 | 2,003,396 |
-| Transformer | 0.0294 | **0.0352** | 0.0128 | 448,324 |
+| Model | Accuracy | Macro F1 |
+| ----------- | -------: | -------: |
+| Random      |   0.7850 |   0.2199 |
+| Majority    |   0.7850 |   0.2199 |
+| MLP         |   0.6410 |   0.3179 |
+| CNN         |   0.1807 |   0.1894 |
+| LSTM        |   0.0482 |   0.0390 |
+| Transformer |   0.2527 |   0.2007 |
 
-**Best model:** LSTM (Macro F1 = 0.3896)
+**Explanations:**
+* **Macro F1 is the primary metric.**
+* **Majority accuracy is high because the dataset is highly imbalanced.**
+* **MLP is currently the strongest validated baseline.**
 
-**Current project state:**
-- ✅ Phase 1: Data analysis and validation complete
-- ✅ Phase 2: Infrastructure and baseline training complete
-- ✅ Phase 2.5: Full benchmark validation complete
-- 🔜 Phase 3: ARST modality-specific encoders (pending Phase 2.5 approval)
+---
+
+## Known Issues and Ongoing Investigation
+
+### Severe Class Imbalance
+* Majority class accounts for ~78.5% of samples.
+* Accuracy alone is misleading.
+* Macro F1 is used as the principal metric.
+
+### CNN Underperformance
+**Current:**
+Macro F1 ≈ 0.189
+
+**Expected:**
+Should exceed MLP.
+
+**Status:**
+Under investigation.
+
+### LSTM Failure
+**Current:**
+Macro F1 ≈ 0.039
+
+This is significantly worse than expected.
+
+**Possible causes:**
+* sequence alignment
+* normalization
+* hidden-state handling
+* class imbalance effects
+
+**Status:**
+Under investigation.
+
+### Transformer Underperformance
+**Current:**
+Macro F1 ≈ 0.201
+
+**Expected:**
+Comparable to LSTM.
+
+**Status:**
+Under investigation.
+
+### Phase 2.6
+**Goal:**
+Repair and validate CNN, LSTM and Transformer baselines before beginning Phase 3.
+
+---
+
+## Research Notes
+
+Tiny-overfit tests succeeded.
+
+Therefore:
+* Training infrastructure is correct.
+* Dataloaders are functional.
+* Architectures are expressive enough.
+
+The poor benchmark results indicate an optimization or data-related issue rather than a capacity issue.
+
+---
 
 > Full benchmark: [`reports/baseline_benchmark_results.md`](reports/baseline_benchmark_results.md)
 ## Evaluation Metrics
@@ -280,13 +362,11 @@ Outputs: `reports/baseline_benchmark_results.md`, `outputs/benchmarks/*.png`
 |---|---|---|
 | 1 | Dataset Exploration & EDA | ✅ Complete |
 | 2 | Baseline Models (infrastructure) | ✅ Complete |
-| 2.5 | Baseline Benchmark Validation | 🔄 In Progress |
-| 3 | Sensor-Specific Encoders | 🔲 |
-| 4 | Reliability Estimation Module | 🔲 |
+| 2.5 | Baseline Benchmark Validation | ✅ Complete |
+| 2.6 | Architecture Validation and Baseline Repair | 🔄 IN PROGRESS |
+| 3 | Modality-Specific Encoders | 🔲 NOT STARTED |
+| 4 | Adaptive Reliability Module | 🔲 |
 | 5 | Adaptive Fusion Transformer | 🔲 |
-| 6 | Missing Modality Robustness | 🔲 |
-| 7 | Evaluation & Ablation Studies | 🔲 |
-| 8 | Explainability & Visualization | 🔲 |
 
 ---
 

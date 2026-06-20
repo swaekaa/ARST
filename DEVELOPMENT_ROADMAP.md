@@ -8,14 +8,14 @@
 ## Roadmap Overview
 
 ```
-Phase 1          Phase 2         Phase 3          Phase 4
-Dataset EDA   →  Baselines   →  Encoders      →  Reliability
-(Weeks 1–2)      (Weeks 3–4)    (Weeks 5–6)      (Weeks 7–8)
+Phase 1          Phase 2         Phase 2.5/2.6    Phase 3
+Dataset EDA   →  Baselines   →   Bench & Repair → Encoders
+(Weeks 1–2)      (Weeks 3–4)     (Week 5)         (Weeks 6-7)
      │
      ▼
-Phase 5          Phase 6         Phase 7          Phase 8
-ARST Fusion   →  Robustness  →  Evaluation    →  Explainability
-(Weeks 9–10)     (Week 11)       (Weeks 12–13)    (Weeks 14–15)
+Phase 4          Phase 5
+Reliability   →  ARST Fusion
+(Weeks 8-9)      (Weeks 10-11)
 ```
 
 ---

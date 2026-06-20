@@ -15,7 +15,7 @@ kernel_sizes:
   - 7
 tof_proj_dim: 64         # 320 → 64 before CNN (controls param count)
 head_hidden_dim: 256
-dropout: 0.3
+dropout: 0.1
 active_modalities:
   - imu
   - thermo

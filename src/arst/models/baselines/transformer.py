@@ -27,6 +27,8 @@ Design notes:
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -86,6 +88,8 @@ class TransformerBaseline(nn.Module):
             raise ValueError("At least one modality must be active.")
 
         # Per-modality input projections
+        # NOTE: These use default Kaiming init — _init_weights() must NOT
+        # override them with trunc_normal_ (that was the Phase 2.5 bug).
         if "imu" in self.active_modalities:
             self.imu_proj = nn.Linear(imu_channels, d_model)
 
@@ -94,6 +98,12 @@ class TransformerBaseline(nn.Module):
 
         if "tof" in self.active_modalities:
             self.tof_proj = nn.Linear(tof_channels, d_model)
+
+        # Shared input norm — stabilises projected features before Transformer
+        self.input_norm = nn.LayerNorm(d_model)
+
+        # Embedding scale factor (Vaswani et al., "Attention Is All You Need")
+        self._embed_scale = math.sqrt(d_model)
 
         # CLS token (single global token prepended to entire concatenated sequence)
         if pool_type == "cls":
@@ -118,17 +128,33 @@ class TransformerBaseline(nn.Module):
 
         # Classification head
         self.head = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
+            nn.Linear(d_model, d_model),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_model // 2, num_classes),
+            nn.Linear(d_model, num_classes),
         )
 
         self._init_weights()
 
     def _init_weights(self) -> None:
-        """Initialise linear layers with truncated normal (following ViT)."""
+        """Initialise Transformer + head layers with truncated normal (ViT-style).
+
+        IMPORTANT: Input projection layers (imu_proj, thermo_proj, tof_proj)
+        are intentionally EXCLUDED — they must keep the default Kaiming
+        initialisation so they can project raw sensor values (which have
+        much larger magnitudes than d_model-scale embeddings).  Overwriting
+        them with trunc_normal_(std=0.02) was the root cause of the Phase 2.5
+        Transformer collapse (F1 = 0.035).
+        """
+        # Collect input projection layers that must be skipped
+        skip_modules = set()
+        for name in ("imu_proj", "thermo_proj", "tof_proj"):
+            if hasattr(self, name):
+                skip_modules.add(id(getattr(self, name)))
+
         for module in self.modules():
+            if id(module) in skip_modules:
+                continue  # keep Kaiming init for input projections
             if isinstance(module, nn.Linear):
                 nn.init.trunc_normal_(module.weight, std=0.02)
                 if module.bias is not None:
@@ -170,6 +196,9 @@ class TransformerBaseline(nn.Module):
 
         # Concatenate all modality tokens along time axis
         x = torch.cat(segments, dim=1)  # [B, T*n_modalities, d_model]
+
+        # Normalise + scale projected features (Vaswani et al.)
+        x = self.input_norm(x) * self._embed_scale
 
         # Prepend CLS token
         if self.pool_type == "cls":
