@@ -244,22 +244,21 @@ Outputs: `reports/baseline_benchmark_results.md`, `outputs/benchmarks/*.png`
 
 
 
-## Current Project Status
+## Current Status
 
-**Phase 1**
-* Complete
+**Current Stage:** PHASE 3 READY
+**Current Development Focus:** Pre-Phase-3 Validation
 
-**Phase 2**
-* Complete
-
-**Phase 2.5**
-* Complete
-
-**Phase 2.6**
-* In Progress
-
-**Phase 3**
-* Not Started
+**Timeline:**
+- Phase 1  Dataset Exploration               COMPLETE
+- Phase 2  Baseline Infrastructure           COMPLETE
+- Phase 2.5 Benchmark Validation             COMPLETE
+- Phase 2.6 Architecture Validation          COMPLETE
+- Phase 2.7 Dataset Investigation            COMPLETE
+- Phase 2.8 Normalization Repair             COMPLETE
+- Phase 3  Modality-Specific Encoders        READY
+- Phase 4  Adaptive Reliability Module       NOT STARTED
+- Phase 5  Adaptive Fusion Transformer       NOT STARTED
 
 ---
 
@@ -331,6 +330,16 @@ Repair and validate CNN, LSTM and Transformer baselines before beginning Phase 3
 
 ---
 
+## Lessons Learned
+
+1. **Tiny-overfit tests confirmed architecture capacity.** Successful fitting of a micro-batch proved the complex architectures were mathematically sound before debugging data pipelines.
+2. **CNN and Transformer collapse originated from missing feature normalization rather than architectural flaws.**
+3. **Data preprocessing bugs can dominate model performance.** Unscaled sensor data forced models into local minima (class collapse) immediately.
+4. **Debugging should follow: Data → Training Pipeline → Optimization → Architecture.** Assuming architectural failure first wastes significant time.
+5. **MLP and LSTM can mask scaling problems** due to implicit smoothing (mean-pooling) and gating (`tanh` squashing), leading to a false sense of pipeline security.
+
+---
+
 ## Research Notes
 
 Tiny-overfit tests succeeded.
@@ -363,8 +372,8 @@ The poor benchmark results indicate an optimization or data-related issue rather
 | 1 | Dataset Exploration & EDA | ✅ Complete |
 | 2 | Baseline Models (infrastructure) | ✅ Complete |
 | 2.5 | Baseline Benchmark Validation | ✅ Complete |
-| 2.6 | Architecture Validation and Baseline Repair | 🔄 IN PROGRESS |
-| 3 | Modality-Specific Encoders | 🔲 NOT STARTED |
+| 2.6 | Architecture Validation and Baseline Repair | ✅ Complete |
+| 3 | Modality-Specific Encoders | 🔄 READY TO BEGIN |
 | 4 | Adaptive Reliability Module | 🔲 |
 | 5 | Adaptive Fusion Transformer | 🔲 |
 
