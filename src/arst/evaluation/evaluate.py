@@ -120,7 +120,7 @@ def _save_evaluation_outputs(
     scalar_metrics.update(metrics.get("f1_per_class", {}))
 
     json_path = output_dir / f"{split_name}_metrics.json"
-    with json_path.open("w") as f:
+    with json_path.open("w", encoding="utf-8") as f:
         json.dump(scalar_metrics, f, indent=2)
     logger.info("Saved scalar metrics -> %s", json_path)
 
@@ -138,7 +138,7 @@ def _save_evaluation_outputs(
     f1_per_class = metrics.get("f1_per_class", {})
     if f1_per_class:
         csv_path = output_dir / f"{split_name}_per_class_f1.csv"
-        with csv_path.open("w") as f:
+        with csv_path.open("w", encoding="utf-8") as f:
             f.write("class,f1\n")
             for cls_name, f1 in f1_per_class.items():
                 f.write(f'"{cls_name}",{f1:.6f}\n')

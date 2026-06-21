@@ -7,36 +7,36 @@
 
 ## 1. Which Baseline Performs Best?
 
-**Best model: LSTM** with Macro F1 = **0.3896**
+**Best model: MLP** with Macro F1 = **0.3179**
 
 | Model | Macro F1 | Δ vs Random |
 |---|---|---|
 | Random | 0.2199 | baseline |
 | MLP | 0.3179 | +0.0981 |
-| CNN | 0.0278 | +-0.1921 |
-| LSTM | 0.3896 | +0.1698 |
-| Transformer | 0.0352 | +-0.1847 |
+| CNN | 0.1894 | +-0.0305 |
+| LSTM | 0.0390 | +-0.1809 |
+| Transformer | 0.2007 | +-0.0192 |
 
 ---
 
 ## 2. Does Temporal Modeling Help?
 
 **MLP (no temporal):** 0.3179
-**CNN (local temporal):** 0.0278
-**LSTM (sequential):** 0.3896
-**Transformer (global attention):** 0.0352
+**CNN (local temporal):** 0.1894
+**LSTM (sequential):** 0.0390
+**Transformer (global attention):** 0.2007
 
-**Yes** — temporal modeling provides meaningful improvement. CNN and LSTM outperform the flat MLP baseline, indicating that temporal structure in the sensor signals carries discriminative information. The Transformer's global attention enables cross-modal temporal reasoning that local CNN cannot capture.
+**Marginal** — temporal models show limited advantage over MLP in this dataset, suggesting that either the window-level statistics dominate, or that the 59.4% ToF invalidity rate is masking temporal structure.
 
 ---
 
 ## 3. Is Transformer Justified?
 
-Transformer Macro F1: **0.0352**
-LSTM Macro F1: **0.3896**
-Difference: -0.3544
+Transformer Macro F1: **0.2007**
+LSTM Macro F1: **0.0390**
+Difference: +0.1617
 
-**Marginally** — the BiLSTM matches or exceeds the Transformer baseline at Phase 2 scale (d_model=128, L=2). The Transformer is still architecturally justified for Phase 3 because its attention mechanism enables reliability-aware gating (core ARST contribution). At larger scale (d_model=256, L=4), Transformer advantage should be clearer.
+**Yes** — the Transformer outperforms the BiLSTM, and its cross-modal attention mechanism provides the foundation for Phase 3 ARST, which needs to model per-timestep reliability across modalities. The Transformer's attention weights can be extended to per-sensor reliability gating.
 
 The Transformer is the recommended baseline for Phase 3 comparisons because:
 1. Highest architectural capacity for incorporating reliability signals
@@ -49,10 +49,10 @@ The Transformer is the recommended baseline for Phase 3 comparisons because:
 
 | Metric | Best Baseline | Perfect | Headroom |
 |---|---|---|---|
-| Macro F1 | 0.3896 | 1.0000 | 0.6104 |
+| Macro F1 | 0.3179 | 1.0000 | 0.6821 |
 | Accuracy | 0.7850 | 1.0000 | 0.2150 |
 
-**Headroom for ARST: 0.6104 Macro F1 points** (~61.0%)
+**Headroom for ARST: 0.6821 Macro F1 points** (~68.2%)
 
 The minority classes ("Hand at target", "Relaxes + moves") have near-zero F1 across all baselines. ARST must specifically address these hard classes through reliability-aware feature weighting.
 
@@ -84,8 +84,8 @@ The minority classes ("Hand at target", "Relaxes + moves") have near-zero F1 acr
 
 ## Recommendation
 
-**Primary baseline for ARST comparison: LSTM** (Macro F1 = 0.3896)
+**Primary baseline for ARST comparison: MLP** (Macro F1 = 0.3179)
 
 All Phase 3 ARST results must beat this threshold to justify the reliability-aware architecture overhead.
 
-**Target for Phase 3 ARST**: Macro F1 ≥ 0.4396 (+5 points over best baseline)
+**Target for Phase 3 ARST**: Macro F1 ≥ 0.3679 (+5 points over best baseline)

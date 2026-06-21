@@ -2,7 +2,7 @@
 
 ## Decision: ⛔ NO-GO
 
-**Reason:** Models below random baseline: CNN, Transformer
+**Reason:** Models below random baseline: CNN, LSTM, Transformer
 
 ---
 
@@ -32,16 +32,16 @@
 | Random | 0.2199 | ❌ |
 | Majority | 0.2199 | ❌ |
 | MLP | 0.3179 | ✅ |
-| CNN | 0.0278 | ❌ |
-| LSTM | 0.3896 | ✅ |
-| Transformer | 0.0352 | ❌ |
+| CNN | 0.1894 | ❌ |
+| LSTM | 0.0390 | ❌ |
+| Transformer | 0.2007 | ❌ |
 
 
 ---
 
 ## Baseline for Phase 3
 
-**Recommended primary baseline: LSTM** (Macro F1 = 0.3896)
+**Recommended primary baseline: MLP** (Macro F1 = 0.3179)
 
 Phase 3 ARST must surpass this to validate the reliability-aware approach.
 

@@ -102,7 +102,7 @@ def _find_latest_metrics(model_key: str) -> dict | None:
     if direct.exists():
         mfile = direct / "test_metrics.json"
         if mfile.exists():
-            with mfile.open() as f:
+            with mfile.open(encoding="utf-8") as f:
                 return json.load(f)
 
     # Trainable baselines — find most recent by name
@@ -120,7 +120,7 @@ def _find_latest_metrics(model_key: str) -> dict | None:
         return None
 
     logger.info("Loading metrics: %s", mfile)
-    with mfile.open() as f:
+    with mfile.open(encoding="utf-8") as f:
         return json.load(f)
 
 

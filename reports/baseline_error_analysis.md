@@ -73,69 +73,69 @@
 
 ## CNN
 
-**Overall:** Accuracy=0.0286  |  Macro F1=0.0278  |  Weighted F1=0.0022
+**Overall:** Accuracy=0.1807  |  Macro F1=0.1894  |  Weighted F1=0.2203
 
 **Class-wise F1:**
 
 | Class | F1 | Performance |
 |---|---|---|
-| Hand at target | 0.0527 | ❌ Weak |
-| Moves hand | 0.0000 | ❌ Fails (F1=0) |
-| Performs gesture | 0.0000 | ❌ Fails (F1=0) |
-| Relaxes + moves | 0.0584 | ❌ Weak |
+| Hand at target | 0.0456 | ❌ Weak |
+| Moves hand | 0.4899 | 🟡 Moderate |
+| Performs gesture | 0.1695 | ❌ Weak |
+| Relaxes + moves | 0.0525 | ❌ Weak |
 
-**Strongest:** Relaxes + moves, Hand at target
-**Weakest:** Moves hand, Performs gesture
-
-**Most common confusions:**
-
-- True **Performs gesture** → Predicted **Hand at target** (625 samples)
-- True **Performs gesture** → Predicted **Relaxes + moves** (335 samples)
-- True **Moves hand** → Predicted **Relaxes + moves** (134 samples)
-
-## LSTM
-
-**Overall:** Accuracy=0.6484  |  Macro F1=0.3896  |  Weighted F1=0.7143
-
-**Class-wise F1:**
-
-| Class | F1 | Performance |
-|---|---|---|
-| Hand at target | 0.0800 | ❌ Weak |
-| Moves hand | 0.6105 | ✅ Strong |
-| Performs gesture | 0.7700 | ✅ Strong |
-| Relaxes + moves | 0.0980 | ❌ Weak |
-
-**Strongest:** Performs gesture, Moves hand
+**Strongest:** Moves hand, Performs gesture
 **Weakest:** Relaxes + moves, Hand at target
 
 **Most common confusions:**
 
-- True **Performs gesture** → Predicted **Moves hand** (155 samples)
-- True **Performs gesture** → Predicted **Hand at target** (136 samples)
-- True **Performs gesture** → Predicted **Relaxes + moves** (63 samples)
+- True **Performs gesture** → Predicted **Hand at target** (474 samples)
+- True **Performs gesture** → Predicted **Relaxes + moves** (290 samples)
+- True **Performs gesture** → Predicted **Moves hand** (107 samples)
 
-## Transformer
+## LSTM
 
-**Overall:** Accuracy=0.0294  |  Macro F1=0.0352  |  Weighted F1=0.0128
+**Overall:** Accuracy=0.0482  |  Macro F1=0.0390  |  Weighted F1=0.0435
 
 **Class-wise F1:**
 
 | Class | F1 | Performance |
 |---|---|---|
-| Hand at target | 0.0460 | ❌ Weak |
-| Moves hand | 0.0441 | ❌ Weak |
-| Performs gesture | 0.0042 | ❌ Weak |
-| Relaxes + moves | 0.0466 | ❌ Weak |
+| Hand at target | 0.0584 | ❌ Weak |
+| Moves hand | 0.0000 | ❌ Fails (F1=0) |
+| Performs gesture | 0.0526 | ❌ Weak |
+| Relaxes + moves | 0.0449 | ❌ Weak |
 
-**Strongest:** Relaxes + moves, Hand at target
-**Weakest:** Moves hand, Performs gesture
+**Strongest:** Hand at target, Performs gesture
+**Weakest:** Relaxes + moves, Moves hand
 
 **Most common confusions:**
 
-- True **Performs gesture** → Predicted **Hand at target** (734 samples)
-- True **Performs gesture** → Predicted **Relaxes + moves** (216 samples)
-- True **Moves hand** → Predicted **Hand at target** (118 samples)
+- True **Performs gesture** → Predicted **Hand at target** (615 samples)
+- True **Performs gesture** → Predicted **Relaxes + moves** (319 samples)
+- True **Moves hand** → Predicted **Relaxes + moves** (133 samples)
+
+## Transformer
+
+**Overall:** Accuracy=0.2527  |  Macro F1=0.2007  |  Weighted F1=0.3463
+
+**Class-wise F1:**
+
+| Class | F1 | Performance |
+|---|---|---|
+| Hand at target | 0.0900 | ❌ Weak |
+| Moves hand | 0.2812 | ❌ Weak |
+| Performs gesture | 0.3747 | 🟡 Moderate |
+| Relaxes + moves | 0.0567 | ❌ Weak |
+
+**Strongest:** Performs gesture, Moves hand
+**Weakest:** Hand at target, Relaxes + moves
+
+**Most common confusions:**
+
+- True **Performs gesture** → Predicted **Hand at target** (369 samples)
+- True **Performs gesture** → Predicted **Relaxes + moves** (258 samples)
+- True **Performs gesture** → Predicted **Moves hand** (111 samples)
 
 ---
 

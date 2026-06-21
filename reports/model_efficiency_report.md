@@ -1,8 +1,8 @@
 # ARST Phase 2.5 — Model Efficiency Report
 
-> Computational cost analysis for all baseline models.
-> Device: NVIDIA GPU (CUDA) / CPU fallback
-> Batch size: 32, Sequence length: T=64
+> Computational cost analysis for all baseline models.  
+> Device: NVIDIA GPU (CUDA) / CPU fallback  
+> Batch size: 32, Sequence length: T=64  
 
 ---
 
@@ -13,9 +13,9 @@
 | Random | 0 (non-parametric) | — |
 | Majority | 0 (non-parametric) | — |
 | MLP | 337,028 | 1.00× MLP |
-| CNN | 172,356 | 0.51× MLP |
+| CNN | 172,740 | 0.51× MLP |
 | LSTM | 2,003,396 | 5.94× MLP |
-| Transformer | 448,324 | 1.33× MLP |
+| Transformer | 457,092 | 1.36× MLP |
 
 ---
 
@@ -39,9 +39,9 @@
 | Random | N/A (non-trainable) | — |
 | Majority | N/A (non-trainable) | — |
 | MLP | 5.5s | — |
-| CNN | 4.1s | — |
-| LSTM | 9.7s | — |
-| Transformer | 8.1s | — |
+| CNN | 3.9s | — |
+| LSTM | 7.9s | — |
+| Transformer | 10.1s | — |
 
 ---
 
@@ -51,10 +51,10 @@
 |---|---|---|
 | Random | N/A | N/A |
 | Majority | N/A | N/A |
-| MLP | 1.48 ms | 21622 samples/s |
-| CNN | 3.20 ms | 10000 samples/s |
-| LSTM | 7.59 ms | 4216 samples/s |
-| Transformer | 5.22 ms | 6130 samples/s |
+| MLP | 1.46 ms | 21918 samples/s |
+| CNN | 3.59 ms | 8914 samples/s |
+| LSTM | 7.85 ms | 4076 samples/s |
+| Transformer | 5.39 ms | 5937 samples/s |
 
 ---
 
