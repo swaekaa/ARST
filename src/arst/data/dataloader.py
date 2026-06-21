@@ -368,6 +368,44 @@ def build_csv_loaders(
     va_imu, va_thm, va_tof, va_mask, va_lbl = extract_split_arrays(val_subjects)
     te_imu, te_thm, te_tof, te_mask, te_lbl = extract_split_arrays(test_subjects)
 
+    # --- Phase 2.8: Normalization Fix ---
+    def fit_scaler(train_arr: np.ndarray, mask: np.ndarray | None = None) -> tuple[float, float]:
+        if mask is not None:
+            valid_vals = train_arr[mask == 1.0]
+            if len(valid_vals) == 0:
+                return 0.0, 1.0
+            mean = float(np.mean(valid_vals))
+            std = float(np.std(valid_vals))
+        else:
+            mean = float(np.mean(train_arr))
+            std = float(np.std(train_arr))
+        return mean, max(std, 1e-6)
+
+    def apply_scaler(arr: np.ndarray, mean: float, std: float, mask: np.ndarray | None = None) -> np.ndarray:
+        arr = (arr - mean) / std
+        if mask is not None:
+            arr = arr * mask  # Zero-out invalid entries again
+        return arr
+
+    logger.info("  Computing normalization statistics from training split...")
+    imu_mean, imu_std = fit_scaler(tr_imu)
+    thm_mean, thm_std = fit_scaler(tr_thm)
+    tof_mean, tof_std = fit_scaler(tr_tof, tr_mask)
+
+    logger.info("  Normalizing datasets...")
+    tr_imu = apply_scaler(tr_imu, imu_mean, imu_std)
+    va_imu = apply_scaler(va_imu, imu_mean, imu_std)
+    te_imu = apply_scaler(te_imu, imu_mean, imu_std)
+
+    tr_thm = apply_scaler(tr_thm, thm_mean, thm_std)
+    va_thm = apply_scaler(va_thm, thm_mean, thm_std)
+    te_thm = apply_scaler(te_thm, thm_mean, thm_std)
+
+    tr_tof = apply_scaler(tr_tof, tof_mean, tof_std, tr_mask)
+    va_tof = apply_scaler(va_tof, tof_mean, tof_std, va_mask)
+    te_tof = apply_scaler(te_tof, tof_mean, tof_std, te_mask)
+    # ------------------------------------
+
     logger.info(
         "  Splits: train=%d, val=%d, test=%d windows",
         len(tr_lbl),
